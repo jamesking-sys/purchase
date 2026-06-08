@@ -10,8 +10,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 import java.util.stream.Collectors;
 
@@ -54,6 +56,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleDuplicateKey(DuplicateKeyException e) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(Result.error(ErrorCode.CODE_DUPLICATE.code(), ErrorCode.CODE_DUPLICATE.message()));
+    }
+
+    /** 缺少必填请求参数 / multipart 部件 → 400（40001）。 */
+    @ExceptionHandler({MissingServletRequestParameterException.class, MissingServletRequestPartException.class})
+    public ResponseEntity<Result<Void>> handleMissingParam(Exception e) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error(ErrorCode.PARAM_INVALID.code(), "缺少必填参数：" + e.getMessage()));
     }
 
     /** 入参校验失败 → 400，聚合字段错误信息。 */

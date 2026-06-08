@@ -105,17 +105,19 @@
             </exclusions>
         </dependency>
 
-        <!-- ===== Excel 导入导出：FastExcel（EasyExcel 继任者，见 ADR-5）===== -->
+        <!-- ===== Excel 导入导出：FastExcel（EasyExcel 继任者，见 ADR-5）=====
+             注：不可排除 commons-compress——POI 写 .xlsx（OOXML=ZIP）依赖它，缺失会在收尾时报「Can not close IO」。 -->
         <dependency>
             <groupId>cn.idev.excel</groupId>
             <artifactId>fastexcel</artifactId>
             <version>${fastexcel.version}</version>
-            <exclusions>
-                <exclusion>
-                    <artifactId>commons-compress</artifactId>
-                    <groupId>org.apache.commons</groupId>
-                </exclusion>
-            </exclusions>
+        </dependency>
+        <!-- 显式锁定 commons-compress 1.25.0：FastExcel 的 POI 5.2.5 需要 putArchiveEntry(ZipArchiveEntry)
+             重载（1.25+），传递解析到的 1.24.0 缺该重载，写 .xlsx 时 NoSuchMethodError。直接声明=深度1，胜出仲裁。 -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-compress</artifactId>
+            <version>1.25.0</version>
         </dependency>
 
         <!-- ===== API 文档：springdoc-openapi + Swagger UI ===== -->
