@@ -1,12 +1,17 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
   servlet:
     context-path: /
-  shutdown: graceful
+  # 优雅停机：先排空在途请求再关闭连接器、释放端口。
+  # 开发期若想停止时立即释放端口（不等待 keep-alive 连接），可设环境变量 SERVER_SHUTDOWN=immediate。
+  shutdown: ${SERVER_SHUTDOWN:graceful}
 
 spring:
   application:
     name: procurement
+  # 优雅停机的最长等待时长：超时即强制关闭并释放端口，避免在途/keep-alive 连接长时间占住端口（默认 30s 偏长）。
+  lifecycle:
+    timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:10s}
   # 数据源：默认连本地 docker-compose 起的 PostgreSQL，可用环境变量覆盖
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/procurement}
@@ -59,3 +64,4 @@ springdoc:
 app:
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:5173}
+

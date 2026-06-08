@@ -42,6 +42,29 @@ mvn spring-boot:run
 
 数据源默认连 `localhost:5432/procurement`，可用环境变量 `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` 覆盖。
 
+#### 停止后端与释放端口 8080
+
+正常停止会触发**优雅停机**后释放端口（`application.yml`：`server.shutdown: graceful` + `spring.lifecycle.timeout-per-shutdown-phase: 10s`，避免在途/keep-alive 连接长时间占住端口）。可用环境变量调整：
+
+- `SERVER_PORT`（默认 8080）
+- `SERVER_SHUTDOWN=immediate`（停止时立即释放端口，不等 keep-alive 连接，开发更顺手）
+- `SHUTDOWN_TIMEOUT`（优雅停机最长等待，默认 `10s`）
+
+> **Windows 上 8080 未被释放（端口被占用）**：`mvn spring-boot:run` 是 `mvn.cmd → java` 多级进程，终端/任务被杀时子 JVM 可能成为**孤儿进程**继续占住 8080，且因未收到关闭信号，优雅停机也不会触发。两种应对：
+>
+> - **推荐**：在 IDEA 用 **Spring Boot 运行配置**（直接 `java` 启动；IDEA 的停止会直接结束该 JVM 并触发优雅停机释放端口），而非 Maven `spring-boot:run` 运行配置。
+> - **兜底**：用脚本强制结束占用端口的进程并释放端口：
+>
+>   ```powershell
+>   # Windows PowerShell
+>   powershell -ExecutionPolicy Bypass -File backend\scripts\free-port.ps1 -Port 8080
+>   ```
+>
+>   ```bash
+>   # git-bash / Unix
+>   bash backend/scripts/free-port.sh 8080
+>   ```
+
 ### 3. 启动前端（端口 5173）
 
 ```bash

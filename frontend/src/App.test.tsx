@@ -1,38 +1,21 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it } from 'vitest';
 import App from './App';
+import { tokenStore } from './auth/tokenStore';
+import { authStore } from './auth/authStore';
 
 /**
- * U0/U1 前端骨架冒烟：App 渲染系统标题，并在拉取 /api/health 后展示服务与数据库状态。
- * fetch 被 mock，不依赖真实后端。
+ * U3 外壳冒烟：未登录访问根路径，AuthGuard 守卫跳转到 /login，渲染登录页。
  */
-describe('App 骨架页', () => {
+describe('App 外壳', () => {
   beforeEach(() => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(() =>
-        Promise.resolve({
-          json: () => Promise.resolve({ code: 0, data: { service: 'up', db: 'ok' } }),
-        } as unknown as Response),
-      ),
-    );
+    tokenStore.clear();
+    authStore.clear();
+    window.history.pushState({}, '', '/');
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  it('渲染系统标题', async () => {
+  it('未登录渲染登录页', () => {
     render(<App />);
-    expect(screen.getByText('采购与资产管理系统')).toBeInTheDocument();
-    await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/health'));
-  });
-
-  it('拉取 /api/health 后展示服务与数据库状态', async () => {
-    render(<App />);
-    await waitFor(() => expect(document.body.textContent).toContain('服务：up'));
-    expect(document.body.textContent).toContain('数据库：ok');
-    expect(fetch).toHaveBeenCalledWith('/api/health');
+    expect(screen.getByText('请登录')).toBeInTheDocument();
   });
 });
