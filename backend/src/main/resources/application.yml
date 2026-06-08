@@ -1,0 +1,61 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+  shutdown: graceful
+
+spring:
+  application:
+    name: procurement
+  # 数据源：默认连本地 docker-compose 起的 PostgreSQL，可用环境变量覆盖
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/procurement}
+    username: ${DB_USERNAME:procurement}
+    password: ${DB_PASSWORD:procurement}
+    driver-class-name: org.postgresql.Driver
+  # Flyway 只管业务表迁移（V*__*.sql）；Flowable 的 ACT_* 表由引擎自管，互不干扰（见 docs/design/db/procurement-db.md §9）
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+# MyBatis-Plus：下划线->驼峰、逻辑删除、枚举映射
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+  type-enums-package: com.gov.procurement.common.enums
+
+# Sa-Token：登录认证 + RBAC（见 ADR-3）
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  is-read-cookie: false
+  is-read-header: true
+  timeout: 86400          # token 有效期 1 天
+  is-concurrent: true     # 允许同一账号多端登录
+  is-log: false
+
+# Flowable：嵌入式 BPMN 引擎，ACT_* 表自动建/更新；生产环境应设为受控（见风险表）
+# U1 阶段无任何 BPMN 流程定义，关闭流程自动部署扫描（check-process-definitions=false），
+# 避免扫描不存在的 processes/ 目录报错；U10 部署采购审批流程时再开启并放入 BPMN。
+flowable:
+  database-schema-update: true
+  async-executor-activate: false
+  check-process-definitions: false
+
+# springdoc / Swagger UI：/swagger-ui.html
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+# 自定义：CORS 允许的前端来源（Vite 默认 5173）
+app:
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173}

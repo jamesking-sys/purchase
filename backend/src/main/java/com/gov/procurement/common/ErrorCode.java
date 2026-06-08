@@ -1,0 +1,35 @@
+package com.gov.procurement.common;
+
+/**
+ * 统一错误码枚举。约定：错误码前三位与 HTTP 状态一致（40001→400、40101/40110→401、40301→403、50000→500），
+ * 由 {@link GlobalExceptionHandler} 据此派生响应状态。沿用 CLAUDE.md 的错误码形态，集中维护码与默认文案。
+ */
+public enum ErrorCode {
+
+    /** 参数校验失败（@Validated / @Valid 触发）。 */
+    PARAM_INVALID(40001, "参数校验失败"),
+    /** 账号不存在或口令错误（对外统一返回，不泄露账号是否存在）。 */
+    LOGIN_FAILED(40101, "账号或口令错误"),
+    /** 未登录或登录态已失效。 */
+    NOT_LOGIN(40110, "未登录或登录已失效"),
+    /** 已登录但缺少所需角色 / 权限。 */
+    NO_PERMISSION(40301, "无权限执行该操作"),
+    /** 系统内部错误（兜底，不外泄堆栈）。 */
+    SYSTEM_ERROR(50000, "服务器内部错误");
+
+    private final int code;
+    private final String message;
+
+    ErrorCode(int code, String message) {
+        this.code = code;
+        this.message = message;
+    }
+
+    public int code() {
+        return code;
+    }
+
+    public String message() {
+        return message;
+    }
+}

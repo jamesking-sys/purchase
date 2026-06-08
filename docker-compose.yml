@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: procurement-pg
+    environment:
+      POSTGRES_DB: procurement
+      POSTGRES_USER: procurement
+      POSTGRES_PASSWORD: procurement
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - procurement-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U procurement -d procurement"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  procurement-pg-data:
