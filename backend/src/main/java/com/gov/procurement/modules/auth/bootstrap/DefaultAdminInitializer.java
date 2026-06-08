@@ -58,25 +58,30 @@ public class DefaultAdminInitializer implements ApplicationRunner {
 
         Long departmentId = ensureSystemDepartment();
         String passwordHash = passwordEncoder.encode(defaultPassword);
+        // 幂等 + 并发安全：ON CONFLICT DO NOTHING 避免多实例并发冷启动撞唯一约束致启动中止（代码审查 F1）。
+        // 用 DO NOTHING（而非捕获 DuplicateKeyException）以免在 @Transactional 内污染事务为 rollback-only。
+        int inserted = jdbcTemplate.update(
+                "INSERT INTO sys_user(name, account, password_hash, department_id) VALUES (?, ?, ?, ?) "
+                        + "ON CONFLICT (account) WHERE is_deleted = 0 DO NOTHING",
+                "系统管理员", ADMIN_ACCOUNT, passwordHash, departmentId);
         Long userId = jdbcTemplate.queryForObject(
-                "INSERT INTO sys_user(name, account, password_hash, department_id) "
-                        + "VALUES (?, ?, ?, ?) RETURNING id",
-                Long.class, "系统管理员", ADMIN_ACCOUNT, passwordHash, departmentId);
+                "SELECT id FROM sys_user WHERE account = ? AND is_deleted = 0", Long.class, ADMIN_ACCOUNT);
         jdbcTemplate.update(
-                "INSERT INTO user_role(user_id, role_id) VALUES (?, ?)", userId, roleId);
+                "INSERT INTO user_role(user_id, role_id) VALUES (?, ?) ON CONFLICT (user_id, role_id) DO NOTHING",
+                userId, roleId);
 
-        log.warn("已创建默认管理员 account={}（使用默认口令，请尽快登录修改）", ADMIN_ACCOUNT);
+        if (inserted > 0) {
+            log.warn("已创建默认管理员 account={}（使用默认口令，请尽快登录修改）", ADMIN_ACCOUNT);
+        }
     }
 
     private Long ensureSystemDepartment() {
-        Long deptId = jdbcTemplate.query(
-                "SELECT id FROM department WHERE code = ? AND is_deleted = 0",
-                rs -> rs.next() ? rs.getLong(1) : null, SYS_DEPT_CODE);
-        if (deptId != null) {
-            return deptId;
-        }
+        // ON CONFLICT DO NOTHING 兼顾幂等与并发安全：已存在则无操作，随后查回 id
+        jdbcTemplate.update(
+                "INSERT INTO department(name, code) VALUES (?, ?) "
+                        + "ON CONFLICT (code) WHERE is_deleted = 0 DO NOTHING",
+                "系统管理部", SYS_DEPT_CODE);
         return jdbcTemplate.queryForObject(
-                "INSERT INTO department(name, code) VALUES (?, ?) RETURNING id",
-                Long.class, "系统管理部", SYS_DEPT_CODE);
+                "SELECT id FROM department WHERE code = ? AND is_deleted = 0", Long.class, SYS_DEPT_CODE);
     }
 }

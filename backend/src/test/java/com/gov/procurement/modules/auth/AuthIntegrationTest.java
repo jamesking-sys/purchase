@@ -1,8 +1,7 @@
 package com.gov.procurement.modules.auth;
 
-import cn.dev33.satoken.annotation.SaCheckRole;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.gov.procurement.common.Result;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
@@ -10,21 +9,9 @@ import org.junit.jupiter.api.condition.EnabledIf;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-import org.testcontainers.DockerClientFactory;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import static org.hamcrest.Matchers.hasItems;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -36,22 +23,17 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * U2 认证/权限基座集成测试（详细设计 §7 T-1..T-8、T-11，及 T-9 角色软删过滤）。
- * 全 Spring 上下文 + Testcontainers PostgreSQL：默认管理员由 DefaultAdminInitializer 启动时创建（admin/admin123）。
- * 无 Docker 的本地环境经 {@link #dockerAvailable()} 整类跳过；CI 有 Docker 则执行。
+ * 全 Spring 上下文 + 本地 PostgreSQL（application.yml 默认 localhost:5432/procurement，不依赖 Docker）：
+ * 默认管理员由 DefaultAdminInitializer 启动时创建（admin/admin123）；测试用户 editor1/zhao/ghost_role 由本类自管增删。
+ * 角色校验探针由同包 test 源集的 {@link RoleProbeController} 经组件扫描提供（/api/test/purchase-mgr-only）。
+ *
+ * <p>本地无 PostgreSQL 时经 {@link com.gov.procurement.support.LocalPg#available} 跳过。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
-@Testcontainers
-@EnabledIf("dockerAvailable")
+@EnabledIf("com.gov.procurement.support.LocalPg#available")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@Import(AuthIntegrationTest.ProbeConfig.class)
 class AuthIntegrationTest {
-
-    @Container
-    static final PostgreSQLContainer<?> PG = new PostgreSQLContainer<>("postgres:16")
-            .withDatabaseName("procurement")
-            .withUsername("procurement")
-            .withPassword("procurement");
 
     @Autowired
     MockMvc mockMvc;
@@ -62,21 +44,11 @@ class AuthIntegrationTest {
     @Autowired
     ObjectMapper objectMapper;
 
-    static boolean dockerAvailable() {
-        return DockerClientFactory.instance().isDockerAvailable();
-    }
-
-    @DynamicPropertySource
-    static void datasourceProps(DynamicPropertyRegistry registry) {
-        registry.add("spring.datasource.url", PG::getJdbcUrl);
-        registry.add("spring.datasource.username", PG::getUsername);
-        registry.add("spring.datasource.password", PG::getPassword);
-    }
-
     @BeforeAll
     void seedUsers() {
+        cleanupTestData();
         Long deptId = jdbcTemplate.queryForObject(
-                "SELECT id FROM department WHERE code = 'SYS' AND is_deleted = 0", Long.class);
+                "SELECT id FROM department WHERE code = 'SYS' AND is_deleted = 0 ORDER BY id LIMIT 1", Long.class);
         insertUser("editor1", "编制员", "pass123", deptId, "editor");
         long zhaoId = insertUser("zhao", "赵仓管", "pass123", deptId, "warehouse", "requester");
         // 软删角色（is_deleted=1）分配给 zhao，验证 INV-3：不出现在角色列表（T-9）
@@ -84,6 +56,11 @@ class AuthIntegrationTest {
                 "INSERT INTO role(name, code, is_deleted) VALUES ('幽灵角色', 'ghost_role', 1) RETURNING id",
                 Long.class);
         jdbcTemplate.update("INSERT INTO user_role(user_id, role_id) VALUES (?, ?)", zhaoId, ghostRoleId);
+    }
+
+    @AfterAll
+    void tearDown() {
+        cleanupTestData();
     }
 
     @Test
@@ -134,7 +111,8 @@ class AuthIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.roles", hasItems("warehouse", "requester")))
                 .andReturn().getResponse().getContentAsString();
-        assertFalse(body.contains("passwordHash"), "响应不应含口令字段");
+        // INV-1：响应不得含口令（字段名或 DB 列名两种形态都不允许出现）
+        assertFalse(body.contains("password"), "响应不应含任何口令字段");
         assertFalse(body.contains("ghost_role"), "软删角色不应出现（T-9 / INV-3）");
     }
 
@@ -166,6 +144,15 @@ class AuthIntegrationTest {
 
     // ---- helpers ----
 
+    private void cleanupTestData() {
+        jdbcTemplate.update("DELETE FROM user_role WHERE user_id IN "
+                + "(SELECT id FROM sys_user WHERE account IN ('editor1', 'zhao'))");
+        jdbcTemplate.update("DELETE FROM user_role WHERE role_id IN "
+                + "(SELECT id FROM role WHERE code = 'ghost_role')");
+        jdbcTemplate.update("DELETE FROM sys_user WHERE account IN ('editor1', 'zhao')");
+        jdbcTemplate.update("DELETE FROM role WHERE code = 'ghost_role'");
+    }
+
     private long insertUser(String account, String name, String rawPwd, Long deptId, String... roleCodes) {
         Long userId = jdbcTemplate.queryForObject(
                 "INSERT INTO sys_user(name, account, password_hash, department_id) "
@@ -186,24 +173,5 @@ class AuthIntegrationTest {
                 .andExpect(jsonPath("$.code").value(0))
                 .andReturn().getResponse().getContentAsString();
         return objectMapper.readTree(content).path("data").path("token").asText();
-    }
-
-    /** 测试专用：注册一个标注 {@code @SaCheckRole("purchase_mgr")} 的受保护探针接口（验证 AC-5 角色校验）。 */
-    @Configuration
-    static class ProbeConfig {
-        @Bean
-        RoleProbeController roleProbeController() {
-            return new RoleProbeController();
-        }
-    }
-
-    @RestController
-    @RequestMapping("/api/test")
-    static class RoleProbeController {
-        @SaCheckRole("purchase_mgr")
-        @GetMapping("/purchase-mgr-only")
-        public Result<String> probe() {
-            return Result.ok("granted");
-        }
     }
 }
