@@ -25,3 +25,4 @@ Thumbs.db
 
 # ===== Claude Code 本地配置（仅忽略本地，共享配置可提交）=====
 .claude/settings.local.json
+/.claude/
