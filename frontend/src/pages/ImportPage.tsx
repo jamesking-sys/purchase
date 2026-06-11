@@ -105,14 +105,23 @@ export default function ImportPage() {
           ref={attachRef}
           type="file"
           hidden
-          onChange={(e) => e.target.files?.[0] && void onPickAttachment(e.target.files[0])}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = ''; // 重置以便重选同名文件仍触发 onChange
+            if (f) {
+              void onPickAttachment(f);
+            }
+          }}
         />
         <input
           ref={templateRef}
           type="file"
           accept=".xlsx"
           hidden
-          onChange={(e) => setTemplateFile(e.target.files?.[0])}
+          onChange={(e) => {
+            setTemplateFile(e.target.files?.[0]);
+            e.target.value = ''; // 重置以便重选同名文件仍触发 onChange（File 已存入 state）
+          }}
         />
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <Button loading={attaching} onClick={() => attachRef.current?.click()}>

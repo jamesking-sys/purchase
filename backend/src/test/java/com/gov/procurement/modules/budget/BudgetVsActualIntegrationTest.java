@@ -202,6 +202,10 @@ class BudgetVsActualIntegrationTest {
         mockMvc.perform(get("/api/budgets/0/vs-actual").header(AUTH, bearer(editorToken)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(40001));
+        // id 非数字 → 40001（MethodArgumentTypeMismatch 映射，避免落 50000 兜底）
+        mockMvc.perform(get("/api/budgets/abc/vs-actual").header(AUTH, bearer(editorToken)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40001));
         // 无查看角色（warehouse 不在允许集）→ 40301
         mockMvc.perform(get("/api/budgets/1/vs-actual").header(AUTH, bearer(warehouseToken)))
                 .andExpect(status().isForbidden())

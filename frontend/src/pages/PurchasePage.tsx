@@ -86,13 +86,13 @@ export default function PurchasePage() {
     }
   }
 
-  async function uploadNotes(files: FileList) {
+  async function uploadNotes(files: File[]) {
     if (!detail) {
       return;
     }
     setUploading(true);
     try {
-      await purchaseApi.uploadNotes(detail.id, Array.from(files));
+      await purchaseApi.uploadNotes(detail.id, files);
       Toast.success('到货单已上传');
       setDetail(await purchaseApi.detail(detail.id));
     } catch {
@@ -267,7 +267,13 @@ export default function PurchasePage() {
               type="file"
               multiple
               hidden
-              onChange={(e) => e.target.files?.length && void uploadNotes(e.target.files)}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = ''; // 重置以便重选同名文件 / 失败重传仍触发
+                if (files.length) {
+                  void uploadNotes(files);
+                }
+              }}
             />
             <Button size="small" loading={uploading} onClick={() => noteRef.current?.click()}>
               上传到货单

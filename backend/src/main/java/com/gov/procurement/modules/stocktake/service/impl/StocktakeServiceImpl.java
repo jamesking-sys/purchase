@@ -104,7 +104,10 @@ public class StocktakeServiceImpl implements StocktakeService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public SaveActualsVO saveActuals(Long stocktakeId, SaveActualsCmd cmd) {
-        Stocktake st = stocktakeMapper.selectById(stocktakeId);
+        // 锁盘点单行：与 confirm 串行化——避免「录入实盘」读到 counting 后、confirm 并发翻 confirmed，
+        // 仍把 actual_qty 写到已确认单上（致 actual_qty != 已据实调整的 quantity，破坏 INV-2）。
+        Stocktake st = stocktakeMapper.selectOne(new LambdaQueryWrapper<Stocktake>()
+                .eq(Stocktake::getId, stocktakeId).last("FOR UPDATE"));
         if (st == null) {
             throw new BizException(ErrorCode.NOT_FOUND, "盘点单不存在");
         }

@@ -11,6 +11,12 @@ import { inboundGuard } from './inboundGuard';
 
 const { Text } = Typography;
 
+/** InputNumber 清空/中间态可能回传非数字，归一为 0，避免 NaN 既不触发超收又被静默丢行。 */
+const toNum = (v: number | string): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 /**
  * 验收入库（U14 AC-6，对接 U9）：输入采购单号查待收明细 → 逐项录本次实收（前端实时核「累计超收」：本次 > 待收即标红禁用提交）→
  * 入库（后端 42204 超收兜底）→ 展示入库记录。限仓管员。
@@ -138,7 +144,7 @@ export default function InboundPage() {
                               min={0}
                               value={val}
                               onChange={(v) =>
-                                setReceived((prev) => ({ ...prev, [it.purchaseItemId]: Number(v) }))
+                                setReceived((prev) => ({ ...prev, [it.purchaseItemId]: toNum(v) }))
                               }
                               style={{ width: 120 }}
                             />

@@ -13,6 +13,10 @@ describe('parsePaths', () => {
     expect(parsePaths('\n  \n')).toEqual([]);
   });
 
+  it('重复行按 keyOf 去重', () => {
+    expect(parsePaths('耗材/试剂盒\n耗材/试剂盒\n耗材 / 试剂盒')).toEqual([['耗材', '试剂盒']]);
+  });
+
   it('keyOf 用「/」连接', () => {
     expect(keyOf(['a', 'b'])).toBe('a/b');
   });
