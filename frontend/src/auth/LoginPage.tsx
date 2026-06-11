@@ -41,8 +41,12 @@ export default function LoginPage() {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh',
-      background: 'var(--semi-color-fill-0)' }}>
-      <Card style={{ width: 360 }}>
+      background: 'linear-gradient(135deg, #eef3ff 0%, var(--pms-bg) 55%)' }}>
+      <Card style={{ width: 380, borderRadius: 12, boxShadow: '0 12px 40px rgba(43,84,224,.12)' }}
+        bodyStyle={{ padding: '28px 28px 24px' }}>
+        <div style={{ width: 40, height: 40, borderRadius: 10, marginBottom: 14,
+          background: 'linear-gradient(135deg, #2b54e0, var(--pms-brand))',
+          boxShadow: '0 6px 16px rgba(0,100,250,.3)' }} />
         <Title heading={3} style={{ marginBottom: 4 }}>采购与资产管理系统</Title>
         <Text type="tertiary">请登录</Text>
         <Form onSubmit={(values) => handleSubmit(values as LoginForm)} style={{ marginTop: 16 }}>

@@ -1,6 +1,6 @@
 # 采购项目管理系统 · 计划看板
 
-> 阶段四·执行计划产物 · 创建日期：2026-06-04（2026-06-05 按 PRD + 原型重构对齐；2026-06-08 进度同步） · 状态：执行中（U0、U1 已完成，下一步 U2）
+> 阶段四·执行计划产物 · 创建日期：2026-06-04（2026-06-05 按 PRD + 原型重构对齐；2026-06-08 进度同步） · 状态：**全功能点 U0–U14 完成**（后端 9 模块 + 前端 11 屏；里程碑 M1–M5 达成，详见 §1 同步记录）
 > 来源（回链）：PRD `docs/prd/procurement-prd.md`、原型 `docs/prototype/index.html`；参考 E-R `docs/design/er/procurement-er.md`、数据库 `docs/design/db/procurement-db.md`、概要设计 `docs/design/general/procurement-general.md`
 > 说明：核心是**依赖关系**——串行脊柱、并行波次、关键路径。功能点 U-ID 对应概要设计 §9 的 FP；**阶段分组镜像原型导航域**（A 基础与权限 / B 预算科目与审批 / D 采购入库与领用出库 / F 盘点），「原型屏」列打通计划↔原型↔PRD。
 
@@ -9,16 +9,31 @@
 ## 1. 看板（按状态）
 
 > 2026-06-08 同步：U0–U5 完成；**U6 预算模板导入完成（FastExcel 流式解析 + 行级校验汇总不中断 + 科目映射 + 金额挂叶子 + 附件留档；3 接口、9 本地 PG 集成测试覆盖 T-1..T-9；零落库原则 + 单事务）**。下一步 **U7 通用审批（Flowable 两级：采购主管→部门主管）**，消费 U6 产出的 budget(draft)。U14 前端业务集成解锁面随各业务页推进。
+> 2026-06-10 同步：**U7 通用审批完成（Flowable 7.1 嵌入式 BPMN `budget_approval` 两节点；提交/待办/通过/驳回/流转历史 5 接口；TaskListener 投影一致性单点 + 同事务；节点-角色双重护栏；驳回=结束实例退回编制态[D-3]；11 本地 PG 集成测试覆盖 T-1..T-11，T-12 原子性由结构保证）**。错误码编码归一：状态冲突 40903、驳回意见必填 42203、对象不存在沿用 40401（详设 §8 / TBD-7 已拍板）。下一步 **U8 采购执行 + 到货单**，消费 U7 产出的 budget(approved)。
+> 2026-06-10 同步：**U8 采购执行 + 到货单完成（创建采购单含明细 / 详情+分页列表 / 多文件上传到货单 / 查询+下载 共 6 个 REST 端点；预算 approved 校验 + 科目叶子校验 + 单事务写主单+明细；`FileStorage` 抽象 + `LocalFileStorage`，下载做目录穿越防护；11 本地 PG 集成测试覆盖 T-1..T-11）**。错误码沿用 40903/40401 归一口径；详设 TBD-1 存储抽象已落地。下一步 **U9 多次到货验收入库（写 `stock_item`/`stock_txn`，累加 received_qty）**，消费 U8 产出的 `purchase_order`(executing)。
+> 2026-06-10 同步：**U9 多次到货验收入库完成（入库 / 入库记录查询 2 接口；单事务写 inbound_order/inbound_item + 累加 purchase_item.received_qty + M5 库存 SoR 记账[stock_item upsert + stock_txn] + 全收转 inbounded；`purchase_item` FOR UPDATE 串行化不超收，`stock_item` ON CONFLICT 原子 upsert 化解并发；12 本地 PG 集成测试覆盖 T-1..T-10 含真实并发 T-7 与对账 INV-3/INV-4）**。新增 M5 `StockService` 为库存唯一记账入口；错误码归一：累计超收 42204、PO 非 executing 40903。下一步 **U10 库存查询+流水 / U11 领用出库 / U12 盘点**（均消费 U9 的库存）。
+> 2026-06-10 同步：**U11 领用 + 仓管审批出库完成（M6 领用单：发起领用 / 待办核库存 / 审批出库 / 驳回 / 查询 5 接口；审批出库单事务行锁防超发——领用单与库存项均 `SELECT … FOR UPDATE`，锁内校验库存充足后经 M5 `StockService.deductStock` 扣减+写 outbound 流水+生成出库单/明细+转 outbound，多明细按 stock_item_id 升序加锁避死锁；驳回意见落库需 Flyway V3 加 `requisition.reject_opinion` 列；12 本地 PG 集成测试覆盖 T-1..T-13 含真实并发零超发与 CHECK 兜底）**。错误码归一：状态不符 40903、库存不足 40904（新增）、驳回意见 42203（复用 U7）。**关键路径 U0→…→U9→U11 全部完成**；剩余 U10/U12/U13 可并行，U14 前端联调。
+> 2026-06-11 同步：**U10 库存查询 + 库存流水完成（M5 只读查询面：库存分页查询 `GET /api/stocks`（项目组/部门/物料名 ILIKE 组合过滤，按 project_group_id+material_name 升序）/ 某库存项流水倒序分页 `GET /api/stocks/{id}/txns`（created_at DESC + id DESC tie-breaker 深翻页稳定，附 bookQty/txnSum 对账汇总 INV-1）共 2 接口；新增 `StockQueryService`，与写入侧记账入口 `StockService` 分离——全 `@Transactional(readOnly=true)` 不写表/不持锁；分页越界显式抛 40001；11 本地 PG 集成测试覆盖 T-1..T-10）**。错误码归一：参数非法 40001、非 warehouse/admin 40301（`SaMode.OR`）、库存项不存在 40401。下一步 **U12 盘点 + 差异调整** 或 **U13 预算 vs 实际**（均就绪、可并行）；前端各业务页归 U14 统一集成。
+> 2026-06-11 同步：**U12 盘点 + 差异调整库存完成（M5 盘点能力：发起盘点 `POST /api/stocktakes`（单事务快照项目组下各库存项账面数 + 批量建明细）/ 录入实盘 `PUT /api/stocktakes/{id}/items`（重算 diff/diff_type，不触库存）/ 确认调整 `POST /api/stocktakes/{id}/confirm`（单事务 FOR UPDATE 锁盘点单防重复确认 → 逐有差异项经新增 M5 记账入口 `StockService.adjustTo` 行锁置数+记 gain/loss 流水 → 翻 confirmed，多明细按 stock_item_id 升序加锁避死锁）共 3 接口；新增 `stocktake` 模块（独立 BC5 聚合）+ `StockService.adjustTo`（绝对值置数，qty_change 按调整时库内当前值算保证 INV-3）；13 本地 PG 集成测试覆盖 T-1..T-12 含真实并发重复确认幂等 T-11、快照后并发改动记账 T-12）**。错误码编码归一（详设草稿早于归一）：状态冲突=已确认 40903（非草稿 40901，与 U7/U9/U11 一致）、实盘数为负新增 42205（草稿 42204 已被 U9 超收占用）、对象不存在 40401、非 warehouse 40301。**剩余仅 U13（预算 vs 实际，只读读模型）后端切片就绪**；其后 U14 前端业务集成联调收口。
+> 2026-06-11 同步：**U13 预算 vs 实际完成（M2 只读读模型：`GET /api/budgets/{id}/vs-actual` 按预算科目聚合「预算 budget_item.amount vs 已发生 purchase_item.amount」对比——预算侧 / 实际侧两段聚合 SQL（实际侧经 purchase_order.budget_id 锚定同一预算，AC-8 不串他预算）+ 应用层以预算科目为基准左连接合并，逐行算 remaining=budgeted−actual / overspent（仅标识不拦截）+ 三项合计，金额两位小数 HALF_UP；新增 `BudgetVsActualMapper`（不绑定单表）/ `BudgetVsActualService`（`@Transactional(readOnly=true)` 零副作用）；查看角色 editor|purchase_mgr|dept_mgr|admin（`SaMode.OR`）；7 本地 PG 集成测试覆盖 T-1..T-7）**。新增通用基建：`GlobalExceptionHandler` 补 `ConstraintViolationException → 40001` 映射（`@Validated`+`@Positive` 路径参非正整数归一为参数错误，原落兜底 50000）。错误码：参数非法 40001、无查看角色 40301、未登录 40110、预算不存在 40401。**至此 U0–U13 后端功能点全部完成；仅剩 U14 前端业务页面集成（消费各业务接口契约，联调收口）**。
+> 2026-06-11 同步：**U14 前端业务集成（首批增量·进行中）**——在 U3 外壳上落地共享数据层（`src/api/*Api.ts` 按后端模块分文件的强类型接口封装 + `Page<T>` + `useAsync` 加载/重试 hook + 盘点差异纯函数 `computeDiff`）与 **3 个业务页**：①**工作台 DashboardPage**（`Promise.allSettled` 并行聚合审批待办/出库待办/执行中采购/在管项目 4 卡，按角色可见性容错——无权限源显示「—」不阻断；我的待办合并审批+出库两类、行可跳转带 bizId，AC-10）；②**盘点 StocktakePage**（选项目组→发起快照→逐项录入实盘实时算盘盈/盘亏→保存→确认调整，确认前自动持久化最新实盘，对接 U12，AC-9）；③**仓管出库 OutboundPage**（待办按项目组列出、逐明细库存核验，不足行标红「库存不足，不可超发」并禁用审批出库[前端前置防护]+后端行锁兜底，支持驳回意见必填，对接 U11，AC-8）。`router.tsx` 按路径覆盖占位页（未实现屏仍走 Placeholder 保证导航可达）。前端 20 测试全绿（新增 stocktakeDiff 4 / Dashboard 2 / Outbound 2 / Stocktake 1）、`tsc` 类型检查 + `vite build` 生产构建通过。**余 8 页待续：org / import / subject(+U13 对比卡) / compare / approval / purchase / inbound / requisition**。
+> 2026-06-11 同步：**U14 B 域写链 4 页完成（进行中）**——落地设计「主线一：导入→比对→审批」：①**ImportPage**（U6：选项目组+预算名→下载模板/上传立项附件得 path→上传 .xlsx 导入；校验失败按 `errorRows` 逐行红条呈现不跳转[AC-1]、全通过 Toast 并可跳比对/审批[AC-2]）；②**ComparePage**（U5：多行「/」分级路径→比对 EXISTS/MISSING→默认勾选缺失项确认新增[AC-3]）；③**SubjectPage**（U5 科目树全量加载+Semi `Tree` 渲染 / 模糊搜索祖先路径面包屑 / 新增根&子级 / 删除[40901 受限]，内嵌 **U13 预算 vs 实际对比卡**——按科目展示预算/已发生/差额、超支红标不拦截[AC-3]）；④**ApprovalPage**（U7：按角色显隐——编制人「提交审批」入口 + 采购主管/部门主管待办通过/驳回[意见必填]/流转历史[AC-4]）。新增通用前端基建：`ApiError` 透传 `Result.data`（导入 `errorRows` 结构化呈现的关键）；二进制模板下载绕过 Result 解包直触发浏览器下载。前端 **29 测试全绿**（新增 comparePaths 3 / importApi[42201+data.errorRows 数据通路] 2 / ApprovalPage 2 / SubjectPage 1 / ComparePage 1）、`tsc` + `vite build` 通过。**U14 已落 7/11 页；余 4 页：org / purchase / inbound / requisition**。
+> U14 契约缺口（待业务拍板）：`requisition`（领用，requester 角色）需选库存物料，但 `GET /api/stocks` 限 warehouse|admin——requester 无法列库存。需定：给 requester 开只读库存查询，或领用页改按项目组/物料名检索。做该页前拍板。
+> 2026-06-11 同步：**U14 完成 —— requisition 页 + 全部 11 屏落地（功能点全收口）**。**RequisitionPage**（对接 U11，领用人）：选项目组拉取可领用库存 → 逐项选物料+数量+用途发起领用（前端校验 qty>0）→ 转待仓管审批；「我的领用」按 `me.userId` 展示本人各单状态。**配套补 U11 后端缺口**（解前述领用契约缺口）：新增 `GET /api/requisitions/stock-options?projectGroupId=`（requester 可见的项目组库存只读列表——领用人无权访问 warehouse 的库存查询 U10，故由领用模块提供；RequisitionIntegrationTest 增 T-14 覆盖列表/40401/40301，后端 12→13 全绿）。前端 **36 测试全绿**（新增 Requisition 1）、`tsc` + `vite build` 通过。**至此 U14 全部 11 屏落地（dashboard/org/import/compare/subject[含 U13 卡]/approval/purchase/inbound/requisition/outbound/stocktake），U0–U14 全功能点完成；里程碑 M5（预算对比 + 可演示）达成。** 两处 U14 契约缺口均以「按角色的只读列表端点」补齐（U9 pending-items / U11 stock-options），思路一致、各带集成测试。
+> 2026-06-11 同步：**U14 A 域 org 页完成（进行中）**——**OrgPage**（对接 U4，Semi `Tabs` 三视图）：①部门（列表/新增/编辑/删除[40901 受限]）；②项目组（列表/增改删 + 所属部门 Select）；③用户与角色（列表展示角色 Tag / 新增[账号+初始口令+部门] / 编辑[姓名+部门] / 删除 / **角色全量覆盖分配**[Checkbox 组，对接 `PUT /users/{id}/roles`]）。写操作限 admin（导航已按角色显隐，后端权威鉴权；编码重复 40902 / 删除受限 40901 由 apiClient Toast）。`orgApi` 扩为完整 18 接口封装。前端 **35 测试全绿**（新增 OrgPage 1）、`tsc` + `vite build` 通过。**U14 已落 10/11 页；仅余 requisition（待契约缺口拍板）**。
+> 2026-06-11 同步：**U14 D 域采购入库链 2 页完成（进行中）**——①**PurchasePage**（U8：选 approved 预算建采购单含动态明细行[预算非 approved 后端回 40903 Toast]、供应商/合同号选填；采购单列表按状态筛选；详情 Modal 含明细 + 到货单上传/下载[AC-5]）；②**InboundPage**（U9：输采购单号查待收明细→逐项录本次实收、**前端实时核「累计超收」本次>待收即标红禁用入库**[AC-6]+后端 42204 兜底→入库并展示入库记录）。**配套补 U9 后端缺口**：新增 `GET /api/inbounds/pending-items?purchaseOrderId=`（warehouse 可见的待收明细只读视图——仓管无权访问 editor 的采购单详情，故由入库模块提供；InboundIntegrationTest 增 T-11 覆盖待收/40401/40301，后端入库测试 12→13 全绿）。新增前端 `download.ts`（二进制下载统一助手，模板/到货单复用）、`purchaseApi`/`inboundApi`。前端 **34 测试全绿**（新增 inboundGuard[超收核验纯函数] 3 / Purchase 1 / Inbound 1）、`tsc` + `vite build` 通过。**U14 已落 9/11 页；余 2 页：org（U4 组织/角色，admin）+ requisition（待上述契约缺口拍板）**。
 > 依赖修复：commons-compress 锁 1.25.0（FastExcel 的 POI 5.2.5 需 putArchiveEntry(ZipArchiveEntry)，传递的 1.24.0 缺该重载致写 xlsx 失败）。
 > 测试策略（无 Docker）：上下文型集成测试（Health/Auth/Org）跑本地 PG（`@EnabledIf` LocalPg 门控）；迁移单测 `MigrationBaselineTest` 因含破坏性校验和篡改、且 procurement 角色无 CREATEDB，保留 Docker 门控（U1 已由实库状态佐证）。
 > 待办（U4 已实现，下列为后续承接）：失效用户会话回收——用户停用/软删时 `StpUtil.logout(userId)` 踢出会话（代码审查 F2，建议在用户停用流补上）。
 
 | 就绪 | 进行中 | 阻塞 | 已完成 |
 |---|---|---|---|
-| **U7 ← U6**（关键路径·Flowable 两级审批，下一步） | — | U8 ← U7；U9 ← U8 | U0 脚手架；U1 数据库基线；U2 认证/权限基座 |
-| | | U13 ← U6,U8 | U3 前端外壳（11 测试）；U4 组织/项目组/用户角色（18 接口·17 测试） |
-| | | U10/U11/U12 ← U9 | U5 预算科目树（6 接口·13 测试） |
-| | | U14 ← U4..U13（契约） | **U6 预算模板导入（FastExcel·3 接口·9 集成测试）** |
+| —（全功能点完成） | — | — | U0 脚手架；U1 基线；U2 认证；U3 前端外壳；U4 组织角色；U5 科目树 |
+| | | | **U6 预算导入（3 接口·9 测试）**；**U7 通用审批（5 接口·11 测试）** |
+| | | | **U8 采购执行+到货单（6 端点·11 测试）**；**U9 验收入库（3 接口·13 测试·M5 SoR）** |
+| | | | **U11 领用+审批出库（6 接口·13 测试·FOR UPDATE 防超发）**；**U10 库存查询+流水（2 接口·11 测试·只读）** |
+| | | | **U12 盘点+差异调整（3 接口·13 测试·M5 adjustTo 记账）**；**U13 预算 vs 实际（1 接口·7 测试·只读读模型）** |
+| | | | **U14 前端集成（11 屏全落地·前端 36 测试·`vite build` 通过）** |
 
 ---
 
@@ -36,14 +51,14 @@
 | A 基础与权限 | U4 | 组织/项目组/用户角色管理 | `org` | FP-1 | 全栈 | U2 | U5 | 硬 | A1,A2 | M | ✅ 已完成（18 接口·17 集成测试） |
 | B 预算科目与审批 | U5 | 预算科目树（多级/模糊搜索/比对新增） | `subject` `compare` | FP-2 | 全栈 | U2 | U4 | 硬 | B2,B3,B4 | M | ✅ 已完成（6 接口·13 集成测试） |
 | B 预算科目与审批 | U6 | 预算模板导入（FastExcel + 校验） | `import` | FP-3 | 全栈 | U4,U5 | — | 硬 | B1 | M | ✅ 已完成（3 接口·9 集成测试） |
-| B 预算科目与审批 | U7 | 通用审批（Flowable 两级/驳回/流转历史） | `approval` | FP-4 | 全栈 | U6 | — | 硬 | C1,C2,C3 | L | 🔜 就绪 |
-| B 预算科目与审批 | U13 | 预算 vs 实际（只读读模型） | `subject`内卡 | FP-10 | 全栈 | U6,U8 | U9 | 硬 | D4 | S | 阻塞 |
-| D 采购入库与领用出库 | U8 | 采购执行 + 到货单上传 | `purchase` | FP-5 | 全栈 | U7 | — | 硬 | D1,D2 | M | 阻塞 |
-| D 采购入库与领用出库 | U9 | 多次到货验收入库（写库存+流水） | `inbound` | FP-6 | 全栈 | U8 | U13 | 硬 | D3 | M | 阻塞 |
-| D 采购入库与领用出库 | U10 | 库存查询 + 库存流水 | （嵌入 `inbound`/`outbound`） | FP-7 | 全栈 | U9 | U11,U12 | 硬 | — | S | 阻塞 |
-| D 采购入库与领用出库 | U11 | 领用 + 仓管审批出库（防超发） | `requisition` `outbound` | FP-8 | 全栈 | U9 | U10,U12 | 硬 | E1,E2,E3 | M | 阻塞 |
-| F 盘点 | U12 | 盘点 + 差异调整库存 | `stocktake` | FP-9 | 全栈 | U9 | U10,U11 | 硬 | F1,F2 | M | 阻塞 |
-| 前端 | U14 | 前端业务页面集成（含工作台聚合） | `dashboard` + 全部屏 | — | 前端 | U4..U13（契约） | 并行 | 软·契约级 | 全部 | L | 阻塞 |
+| B 预算科目与审批 | U7 | 通用审批（Flowable 两级/驳回/流转历史） | `approval` | FP-4 | 全栈 | U6 | — | 硬 | C1,C2,C3 | L | ✅ 已完成（5 接口·11 集成测试） |
+| B 预算科目与审批 | U13 | 预算 vs 实际（只读读模型） | `subject`内卡 | FP-10 | 全栈 | U6,U8 | U9 | 硬 | D4 | S | ✅ 已完成（1 接口·7 集成测试·只读读模型） |
+| D 采购入库与领用出库 | U8 | 采购执行 + 到货单上传 | `purchase` | FP-5 | 全栈 | U7 | — | 硬 | D1,D2 | M | ✅ 已完成（6 端点·11 集成测试） |
+| D 采购入库与领用出库 | U9 | 多次到货验收入库（写库存+流水） | `inbound` | FP-6 | 全栈 | U8 | U13 | 硬 | D3 | M | ✅ 已完成（2 接口·12 集成测试） |
+| D 采购入库与领用出库 | U10 | 库存查询 + 库存流水 | （嵌入 `inbound`/`outbound`） | FP-7 | 全栈 | U9 | U11,U12 | 硬 | — | S | ✅ 已完成（2 接口·11 集成测试·只读） |
+| D 采购入库与领用出库 | U11 | 领用 + 仓管审批出库（防超发） | `requisition` `outbound` | FP-8 | 全栈 | U9 | U10,U12 | 硬 | E1,E2,E3 | M | ✅ 已完成（5 接口·12 集成测试） |
+| F 盘点 | U12 | 盘点 + 差异调整库存 | `stocktake` | FP-9 | 全栈 | U9 | U10,U11 | 硬 | F1,F2 | M | ✅ 已完成（3 接口·13 集成测试·M5 adjustTo） |
+| 前端 | U14 | 前端业务页面集成（含工作台聚合） | `dashboard` + 全部屏 | — | 前端 | U4..U13（契约） | 并行 | 软·契约级 | 全部 | L | ✅ 已完成（11 屏全落地·API 层/hook·前端 36 测试·补 U9 pending-items / U11 stock-options） |
 
 > 粗估：S(≤1d) / M(2-3d) / L(≥1w)。
 > 对齐说明：原型导航把「B 预算与科目 + C 审批」合并为 **B 域**、把「D 采购入库 + E 领用出库」合并为 **D 域**；本表阶段列与之一致。PRD 的 C1–C3 归入 B 域 U7、D1–D4 与 E1–E3 归入 D 域 U8–U11/U13，编号仍按 PRD 可追溯。

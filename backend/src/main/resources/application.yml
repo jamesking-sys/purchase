@@ -46,12 +46,12 @@ sa-token:
   is-log: false
 
 # Flowable：嵌入式 BPMN 引擎，ACT_* 表自动建/更新；生产环境应设为受控（见风险表）
-# U1 阶段无任何 BPMN 流程定义，关闭流程自动部署扫描（check-process-definitions=false），
-# 避免扫描不存在的 processes/ 目录报错；U10 部署采购审批流程时再开启并放入 BPMN。
+# U7 起部署预算审批流程 budget_approval（processes/*.bpmn20.xml），开启自动部署扫描。
+# 无异步/定时任务，关闭 async-executor 以省资源。
 flowable:
   database-schema-update: true
   async-executor-activate: false
-  check-process-definitions: false
+  check-process-definitions: true
 
 # springdoc / Swagger UI：/swagger-ui.html
 springdoc:

@@ -35,7 +35,7 @@ U9 实现「多次到货分批验收入库」：一张已执行的采购单（U8
 - P2：`purchaseOrderId` 对应采购单存在且未作废（`status ∈ {executing}`；否则 40401 / 状态非法）。
 - P3：每条实收明细的 `purchaseItemId` 属于该采购单且存在（否则 40401）。
 - P4：每条 `receivedQty > 0`（本次实收为正；否则 40001）。
-- P5：对每条明细，`purchase_item.received_qty(库内当前) + 本次 receivedQty ≤ qty`（不超收；否则 42203）。
+- P5：对每条明细，`purchase_item.received_qty(库内当前) + 本次 receivedQty ≤ qty`（不超收；否则 42204）。
 
 **后置条件**
 - Q1：生成 1 张 `inbound_order`（`received_by=当前仓管`、`inbound_at=now()`）。
@@ -56,7 +56,7 @@ U9 实现「多次到货分批验收入库」：一张已执行的采购单（U8
 
 - **AC-1 单次入库**：对 `executing` 采购单提交一次实收（小于采购数量），返回入库单 id；`received_qty`、`stock_item.quantity` 正确累加，生成 inbound 流水，采购单仍 `executing`。
 - **AC-2 分批多次入库**：同一采购单多次提交，每次累加，`received_qty` 逐次逼近 `qty`，库存量逐次增加，流水逐条追加。
-- **AC-3 累计超收拒绝**：`received_qty(当前) + 本次 > qty` 时拒绝（42203），不写任何表（事务回滚）。
+- **AC-3 累计超收拒绝**：`received_qty(当前) + 本次 > qty` 时拒绝（42204），不写任何表（事务回滚）。
 - **AC-4 库存正确累加 / 聚合**：相同 `material_name + project_group_id` 的多次/多明细入库聚合到同一 `stock_item`，`quantity` 为累加值。
 - **AC-5 全部入完转 inbounded**：当采购单所有明细 `received_qty == qty`，采购单 `status` 由 `executing → inbounded`。
 - **AC-6 鉴权**：非 `warehouse` 角色调用入库返回 40301。
@@ -80,7 +80,7 @@ sequenceDiagram
     S4->>DB: 查 purchase_order(校验存在/executing)
     S4->>DB: 查 purchase_item FOR UPDATE(本采购单相关行)
     loop 每条实收明细
-        S4->>S4: 校验 received_qty(当前)+本次 <= qty(不超收, 否则 42203)
+        S4->>S4: 校验 received_qty(当前)+本次 <= qty(不超收, 否则 42204)
     end
     S4->>DB: insert inbound_order(received_by, inbound_at)
     loop 每条实收明细
@@ -148,9 +148,9 @@ stateDiagram-v2
 ### 5.1 不超收校验（INV-1 / AC-3）
 
 - 入库前对每条明细按 `purchase_item_id` 行锁读取库内当前 `received_qty`、`qty`：
-  - `if (received_qty + 本次 receivedQty > qty) throw new BizException(42203, "累计超收：明细 " + purchaseItemId)`。
+  - `if (received_qty + 本次 receivedQty > qty) throw new BizException(42204, "累计超收：明细 " + purchaseItemId)`。
 - 同一请求若包含同一 `purchase_item_id` 的多行，需先在内存按明细累加本次合计再比对（避免单行各自通过、合计超收）。
-- DB `CHECK (received_qty >= 0 AND received_qty <= qty)` 为最终兜底：任何绕过应用层的写入触发约束违例 → 事务回滚（映射 42203，见 §8）。
+- DB `CHECK (received_qty >= 0 AND received_qty <= qty)` 为最终兜底：任何绕过应用层的写入触发约束违例 → 事务回滚（映射 42204，见 §8）。
 
 ### 5.2 stock_item upsert（AC-4）
 
@@ -174,7 +174,7 @@ return stock_item_id  // 回填 inbound_item.stock_item_id
 
 - `InboundService.createInbound` 标注 `@Transactional(rollbackFor = Exception.class)`，覆盖步骤 1–6 全部写入。
 - M4 调 M5 的 `adjustStock` 为**同进程同步**内部能力，运行在同一事务（同一 `@Transactional` 传播 `REQUIRED`），不开新事务、不跨服务远程调用。
-- 任一校验失败（42203/40401/40001）或 DB 约束违例 → 抛异常 → 整体回滚，保证「不写半张入库单 / 不虚增库存」。
+- 任一校验失败（42204/40401/40001）或 DB 约束违例 → 抛异常 → 整体回滚，保证「不写半张入库单 / 不虚增库存」。
 - 并发控制：`purchase_item` 与 `stock_item` 均以 `SELECT ... FOR UPDATE` 行锁串行化同一行的并发入库（AC-7），配合 CHECK 兜底，杜绝超收与丢更新。
 
 ---
@@ -218,7 +218,7 @@ return stock_item_id  // 回填 inbound_item.stock_item_id
             "items": [ { "purchaseItemId": 5001, "receivedQtyTotal": 1, "stockItemId": 9001 } ] } }
 ```
 
-- **错误**：40001 参数 / 40301 无权限 / 40401 采购单或明细不存在 / 42203 累计超收 / 50000 系统。
+- **错误**：40001 参数 / 40301 无权限 / 40401 采购单或明细不存在 / 42204 累计超收 / 50000 系统。
 
 ### 6.2 入库记录查询
 
@@ -248,13 +248,13 @@ return stock_item_id  // 回填 inbound_item.stock_item_id
 |---|---|---|---|
 | T-1 | AC-1 | 单次入库（实收 < 采购数量） | 返回 inboundOrderId；`purchase_item.received_qty` 增本次；`stock_item.quantity` 增本次；生成 1 条 inbound 流水；采购单仍 `executing` |
 | T-2 | AC-2 | 分批多次入库（同明细两次） | 两次累加，`received_qty`=两次和，`quantity`=两次和，流水 2 条 |
-| T-3 | AC-3 | 累计超收（当前+本次 > qty） | 抛 42203；inbound_order/inbound_item/stock_txn 均未写入，`received_qty`/`quantity` 不变（回滚） |
-| T-3b | AC-3 | 同请求同明细多行合计超收 | 内存合计比对触发 42203，整体回滚 |
+| T-3 | AC-3 | 累计超收（当前+本次 > qty） | 抛 42204；inbound_order/inbound_item/stock_txn 均未写入，`received_qty`/`quantity` 不变（回滚） |
+| T-3b | AC-3 | 同请求同明细多行合计超收 | 内存合计比对触发 42204，整体回滚 |
 | T-4 | AC-4 | 相同 material+project_group 多明细/多次 | 聚合到同一 `stock_item`，`quantity` 为累加值；首入新建库存项、再入更新 |
 | T-5 | AC-5 | 末次入库使所有明细满量 | 采购单 `status` 由 `executing → inbounded` |
 | T-5b | AC-5 | 仍有明细未满量 | 采购单保持 `executing` |
 | T-6 | AC-6 | 非 warehouse 角色调用 | 返回 40301，无写入 |
-| T-7 | AC-7 | 同一采购单/库存项并发入库（FOR UPDATE 串行化） | 最终 `received_qty`/`quantity`/流水和一致；不超收、不丢更新；超收的并发请求被 42203 拒绝 |
+| T-7 | AC-7 | 同一采购单/库存项并发入库（FOR UPDATE 串行化） | 最终 `received_qty`/`quantity`/流水和一致；不超收、不丢更新；超收的并发请求被 42204 拒绝 |
 | T-8 | AC-1/INV | 采购单不存在 / 明细不属本单 | 返回 40401，无写入 |
 | T-9 | AC-1 | `receivedQty <= 0` 或 items 为空 | 返回 40001，无写入 |
 | T-10 | INV-3 | 入库后对账 | `stock_item.quantity == Σ stock_txn.qty_change`；`purchase_item.received_qty == Σ inbound_item.received_qty` |
@@ -263,15 +263,18 @@ return stock_item_id  // 回填 inbound_item.stock_item_id
 
 ## 8. 异常处理
 
-| 触发 | 错误码 | 处理 |
-|---|---|---|
-| 参数缺失 / `receivedQty<=0` / items 空 | 40001 | `@Validated` + 服务层校验，抛 `BizException(40001,...)`，事务未开启或回滚 |
-| 非 `warehouse` 角色 | 40301 | Sa-Token `@SaCheckRole` 拦截，由全局异常处理转 `Result.error(40301,...)` |
-| 采购单不存在 / 已作废 / 明细不属本单 | 40401 | 服务层查不到或状态非法，抛 `BizException(40401,...)`，回滚 |
-| 累计超收（应用层比对） | 42203 | 抛 `BizException(42203,...)`，整事务回滚（AC-3） |
-| DB CHECK 违例（`received_qty<=qty` / `quantity>=0` 兜底） | 42203 | 捕获约束违例（如 PG `23514`）映射为 42203，事务回滚（兜底防绕过） |
-| `uk_stock` 唯一冲突（并发新建库存项） | — | 同事务内重读后改 update；或抛出触发事务重试，最终一致（INV-3） |
-| 其他未预期异常 | 50000 | 全局异常处理记录日志，返回系统错误，事务回滚 |
+> **编码阶段错误码归一（与 U7/U8 一致）**：初稿「累计超收」用的 `42203` 与 U7 `REJECT_OPINION_REQUIRED(42203)` 冲突，统一为 **42204**（`OVER_RECEIVE`，新增）。「采购单存在但非 executing」从初稿的 40401 拆出，记 **40903**（`STATE_CONFLICT`，与 U8 一致）；「采购单 / 明细不存在」沿用 **40401**。HTTP 由 `code/100` 派生：40401→404、40903→409、42204→422、40001→400。
+> **并发库存 upsert**：编码以 `INSERT ... ON CONFLICT (material_name, project_group_id) WHERE is_deleted=0 DO UPDATE SET quantity = quantity + EXCLUDED.quantity RETURNING id` 原子实现「命中累加 / 未命中新建」，DB 层化解并发新建与并发累加竞态（替代初稿的「重读改 update / 事务重试」描述，效果等价且更简洁）；`purchase_item` 仍以 `SELECT ... FOR UPDATE` 锁行串行化不超收校验。
+
+| 触发 | 错误码 | HTTP | 处理 |
+|---|---|---|---|
+| 参数缺失 / `receivedQty<=0` / items 空 | 40001 | 400 | `@Validated` + 服务层校验，抛 `BizException(40001,...)` |
+| 非 `warehouse` 角色 | 40301 | 403 | Sa-Token `@SaCheckRole` 拦截，全局异常处理转 `Result.error(40301,...)` |
+| 采购单 / 采购明细不存在（明细不属本单） | 40401 | 404 | 服务层查不到，抛 `BizException(40401,...)`，回滚 |
+| 采购单非 `executing`（已入库 / 作废） | 40903 | 409 | 状态前置校验，抛 `BizException(40903,...)`，回滚 |
+| 累计超收（应用层 FOR UPDATE 下比对） | 42204 | 422 | 抛 `BizException(42204,...)`，整事务回滚（AC-3） |
+| DB CHECK 违例（`received_qty<=qty` / `quantity>=0` 兜底） | — | 500 | FOR UPDATE 串行化使应用层校验权威，CHECK 仅理论兜底；若触发即视为严重不一致，归 50000 并回滚 |
+| 其他未预期异常 | 50000 | 500 | 全局异常处理记录日志，返回系统错误，事务回滚 |
 
 - 全局异常处理器（`GlobalExceptionHandler`）统一将 `BizException.getCode()` 透传到 `Result.code`；未捕获异常归一为 50000。
 - 所有错误路径均不得留下「半成品入库单」或「库存虚增」——由 §5.4 单事务保证。

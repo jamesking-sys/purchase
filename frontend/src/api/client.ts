@@ -18,11 +18,14 @@ const UNAUTHORIZED_DEBOUNCE_MS = 3000;
 
 export class ApiError extends Error {
   readonly code: number;
+  /** 业务错误时透传的 Result.data（如导入校验失败的 errorRows），供页面结构化呈现。 */
+  readonly data: unknown;
 
-  constructor(code: number, message: string) {
+  constructor(code: number, message: string, data?: unknown) {
     super(message);
     this.name = 'ApiError';
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -92,7 +95,7 @@ async function request<T>(method: string, url: string, body?: unknown, opts: Req
   } else if (!opts.silent) {
     Toast.error(result.message || '操作失败');
   }
-  throw new ApiError(result.code, result.message || '操作失败');
+  throw new ApiError(result.code, result.message || '操作失败', result.data);
 }
 
 export const apiClient = {

@@ -42,13 +42,13 @@
 | **AC-2 采购主管通过** | Given approval 处于 `pending_purchase_mgr`、当前用户具 `purchase_mgr`；When `POST /approve`；Then complete 任务、流转到 `dept_mgr`、`approval.status=pending_dept_mgr`、写一条 `approval_record`(node=purchase_mgr,action=approve)。 |
 | **AC-3 部门主管通过（终审）** | Given `pending_dept_mgr`、用户具 `dept_mgr`；When `POST /approve`；Then 流程结束、`approval.status=approved`、`budget.status=approved`、写 record(node=dept_mgr,approve)。 |
 | **AC-4 驳回退回（任一节点）** | Given 节点一或节点二待审；When `POST /reject`(opinion 非空)；Then 写 record(action=reject,opinion)、结束流程实例、`approval.status=rejected`→随后置 `draft`、`budget.status=draft`（退回编制态可改）。 |
-| **AC-5 驳回意见必填** | Given 驳回请求 opinion 为空/空白；When `POST /reject`；Then 拒绝（**42202**），不推进流程、不写 record。 |
+| **AC-5 驳回意见必填** | Given 驳回请求 opinion 为空/空白；When `POST /reject`；Then 拒绝（**42203**，编码归一后，见 §8 注），不推进流程、不写 record。 |
 | **AC-6 重提为新实例** | Given 被驳回回到 `draft` 的预算；When 编制人再次 `POST /api/approvals`；Then 启动**新**流程实例（新 process_instance_id），从 `purchase_mgr` 重走；历史保留旧 record（按 approval_id 全量可查）。 |
 | **AC-7 节点-角色校验** | Given 当前节点 `purchase_mgr`；When `dept_mgr` 或他角色调 `/approve`；Then 拒绝（**40301** 角色与当前节点不符），流程不动。 |
 | **AC-8 待办按角色** | Given 登录用户角色集合；When `GET /api/approvals/todo`；Then 仅返回 candidateGroup ∈ 用户角色 且未完成的任务（采购主管见节点一、部门主管见节点二）。 |
-| **AC-9 任务已处理幂等** | Given 任务已被 complete（或并发重复提交）；When 再次 `approve`/`reject`；Then 拒绝（**40901** 状态不符/任务已处理），无重复 record、无重复状态翻转。 |
+| **AC-9 任务已处理幂等** | Given 任务已被 complete（或并发重复提交）；When 再次 `approve`/`reject`；Then 拒绝（**40903** 状态不符/任务已处理），无重复 record、无重复状态翻转。 |
 | **AC-10 流转历史完整** | Given 任一 approval；When `GET /{id}/history`；Then 按 acted_at 升序返回全部 record（节点/处理人/动作/时间/意见），含驳回与多轮重提。 |
-| **AC-11 对象不存在** | Given biz/approval/budget 不存在；When 任一接口引用；Then 拒绝（**40405**）。 |
+| **AC-11 对象不存在** | Given biz/approval/budget 不存在；When 任一接口引用；Then 拒绝（**40401**，沿用全局 NOT_FOUND）。 |
 
 ---
 
@@ -196,9 +196,9 @@ stateDiagram-v2
   { "bizType": "budget", "bizId": 1014 }
   ```
   - `bizType` 非空（本期仅 `budget`）；`bizId` 非空、>0。
-- **逻辑**：校验 budget 存在(40405) 且 `status=draft`(否则 40901) → 启动实例 → 写 approval（pending_purchase_mgr）→ budget=submitted。
+- **逻辑**：校验 budget 存在(40401) 且 `status=draft`(否则 40903) → 启动实例 → 写 approval（pending_purchase_mgr）→ budget=submitted。
 - **响应**：`Result<Long>`（approvalId）。
-- **错误码**：40405 / 40901 / 50000。
+- **错误码**：40401 / 40903 / 50000。
 
 ### 6.2 待办查询 — `GET /api/approvals/todo`
 - **鉴权**：`@SaCheckRole(value={"purchase_mgr","dept_mgr"}, mode=SaMode.OR)`。
@@ -209,9 +209,9 @@ stateDiagram-v2
 ### 6.3 通过 — `POST /api/approvals/{id}/approve`
 - **鉴权**：`@SaCheckRole(value={"purchase_mgr","dept_mgr"}, mode=SaMode.OR)`。
 - **路径参数**：`id`=approvalId。
-- **逻辑**：取 approval(40405)→ 校验仍处 pending(40901)→ 取活动 task、节点-角色比对(40301)→ `complete(taskId,{action:approve})`（TaskListener 写 record + 翻状态、终审同步 budget=approved）。
+- **逻辑**：取 approval(40401)→ 校验仍处 pending(40903)→ 取活动 task、节点-角色比对(40301)→ `complete(taskId,{action:approve})`（TaskListener 写 record + 翻状态、终审同步 budget=approved）。
 - **响应**：`Result<Void>`。
-- **错误码**：40301 / 40901 / 40405 / 50000。
+- **错误码**：40301 / 40903 / 40401 / 50000。
 
 ### 6.4 驳回 — `POST /api/approvals/{id}/reject`
 - **鉴权**：同 6.3。
@@ -219,15 +219,15 @@ stateDiagram-v2
   ```json
   { "opinion": "科目划分不合理，请修订后重提" }
   ```
-  - `opinion` **必填**、非空白、≤512；空白 → **42202**。
-- **逻辑**：取 approval(40405)→ pending 校验(40901)→ 节点-角色(40301)→ 写 record(reject,opinion)→ `deleteProcessInstance`→ approval=draft、budget=draft（退回编制）。
+  - `opinion` **必填**、非空白、≤512；空白 → **42203**。
+- **逻辑**：取 approval(40401)→ pending 校验(40903)→ 节点-角色(40301)→ 写 record(reject,opinion)→ `deleteProcessInstance`→ approval=draft、budget=draft（退回编制）。
 - **响应**：`Result<Void>`。
-- **错误码**：40301 / 40901 / 42202 / 40405 / 50000。
+- **错误码**：40301 / 40903 / 42203 / 40401 / 50000。
 
 ### 6.5 流转历史 — `GET /api/approvals/{id}/history`
 - **鉴权**：`@SaCheckLogin`（登录可查；如需更严按项目组归属过滤，见 §10）。
 - **路径参数**：`id`=approvalId。
-- **逻辑**：校验 approval 存在(40405)→ 查 `approval_record WHERE approval_id=? ORDER BY acted_at ASC`（`idx_ar_approval`）。
+- **逻辑**：校验 approval 存在(40401)→ 查 `approval_record WHERE approval_id=? ORDER BY acted_at ASC`（`idx_ar_approval`）。
 - **响应**：`Result<List<HistoryItemVO>>`，`HistoryItemVO{ nodeSeq, node, approverName, action, opinion, actedAt }`（含多轮重提的全部记录，AC-10）。
 
 > 接口数：**5**（提交 / 待办 / 通过 / 驳回 / 历史）。
@@ -257,19 +257,19 @@ stateDiagram-v2
 
 ## 8. 异常处理
 
+> **编码阶段错误码归一（TBD-7 已拍板）**：本文初稿用的 `40901`/`42202`/`40405` 与既有模块冲突——`40901`=`DELETE_RESTRICTED`、`42202`=`AMOUNT_NOT_LEAF`（U6）已占用，`40405` 与全局 `NOT_FOUND(40401)` 重复。编码时统一为：状态冲突 **40903**（`STATE_CONFLICT`，新增，与 40901/40902 同属 409 段）、驳回意见必填 **42203**（`REJECT_OPINION_REQUIRED`，新增）、对象不存在沿用 **40401**（`NOT_FOUND`）、节点-角色不符沿用 **40301**（`NO_PERMISSION`）。`GlobalExceptionHandler` 已按 `code/100` 派生 HTTP 状态，新码无需额外映射逻辑。
+
 | 场景 | 错误码 | HTTP | 抛出点 |
 |---|---|---|---|
 | 角色与当前节点不符 | 40301 | 403 | Service 节点-角色比对 |
-| 状态不符 / 任务已处理 / 重复提交 | 40901 | 409 | Service 状态前置校验 + Flowable 乐观锁映射 |
-| 驳回未填意见 | 42202 | 422 | reject DTO 校验 / Service |
-| 审批单 / 预算 / 业务单据不存在 | 40405 | 404 | Service 查询空 |
+| 状态不符 / 任务已处理 / 重复提交 | 40903 | 409 | Service 状态前置校验 + Flowable 乐观锁映射 |
+| 驳回未填意见 | 42203 | 422 | reject Service 校验（空白） |
+| 审批单 / 预算 / 业务单据不存在 | 40401 | 404 | Service 查询空 |
 | 缺角色（粗粒度） | 40300 | 403 | Sa-Token `@SaCheckRole`（既有处理器） |
 | 未登录 | 40100 | 401 | Sa-Token（既有处理器） |
 | 系统/未捕获 | 50000 | 500 | 全局兜底 |
 
-- `GlobalExceptionHandler` 需扩展：
-  - 新增 `@ExceptionHandler(FlowableOptimisticLockingException.class)` → 40901(409)。
-  - `BizException` 现固定 400；本设计的 40301/40901/42202/40405 需按 code 映射到 403/409/422/404（建议 handler 内按 code 段决定 HttpStatus，或新增带 status 的异常子类）。**待 coding 阶段统一**（见 §10 TBD-引擎表外）。
+- `GlobalExceptionHandler` 已扩展：新增 `@ExceptionHandler(FlowableOptimisticLockingException.class)` → 40903(409)；`BizException` 仍按 `code/100` 派生状态（40301→403、40903→409、42203→422、40401→404）。
 - 监听器内**不得吞异常**：任何投影写库失败须冒泡以回滚引擎推进（§5.3）。
 
 ---
@@ -295,7 +295,7 @@ stateDiagram-v2
 | TBD-4 | 重提复用同一 approval 行 vs 新建 approval | 暂定复用同一行（按 biz_type+biz_id），多轮 record 累积；新建行则历史更隔离 | 技术 |
 | TBD-5 | 驳回后 process_instance_id 处理 | 暂定置空（仅 record 留痕）；或保留旧值供 `ACT_HI_*` 回溯 | 技术 |
 | TBD-6 | history/todo 数据权限 | 暂定登录即可查 history；是否按项目组/部门归属过滤待定 | 业务 |
-| TBD-7 | BizException 错误码→HTTP 状态映射 | 暂定 handler 内按 code 段映射（40301→403/40901→409/42202→422/40405→404）；或引入带 status 的异常子类 | 技术 |
+| ~~TBD-7~~ | BizException 错误码→HTTP 状态映射 | **已拍板（编码阶段）**：复用 handler 的 `code/100` 派生，新增 40903/42203、对象不存在沿用 40401（详见 §8 归一说明） | 技术 ✅ |
 
 ---
 

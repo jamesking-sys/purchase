@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  U7 通用审批流程定义 budget_approval（两节点：采购主管 → 部门主管）。
+  详设：docs/design/detail/U7-approval-flowable.md §1.1。
+  - 两个 UserTask 的 candidateGroups 取 role.code（purchase_mgr / dept_mgr），由服务层细粒度比对登录用户角色。
+  - 两节点均绑定 complete TaskListener（Spring bean approvalProjectionListener），与 taskService.complete() 同事务写业务投影。
+  - 通过：顺序流推进；驳回不走此流程的回退，由 Service 调 deleteProcessInstance 结束实例（决策 D-3）。
+-->
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"
+             xmlns:flowable="http://flowable.org/bpmn"
+             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+             targetNamespace="http://www.gov.com/procurement/bpmn">
+
+    <process id="budget_approval" name="预算审批" isExecutable="true">
+
+        <startEvent id="start" name="提交审批"/>
+
+        <sequenceFlow id="flow_start_pm" sourceRef="start" targetRef="node_purchase_mgr"/>
+
+        <userTask id="node_purchase_mgr" name="采购主管审批" flowable:candidateGroups="purchase_mgr">
+            <extensionElements>
+                <flowable:taskListener event="complete" delegateExpression="${approvalProjectionListener}"/>
+            </extensionElements>
+        </userTask>
+
+        <sequenceFlow id="flow_pm_dm" sourceRef="node_purchase_mgr" targetRef="node_dept_mgr"/>
+
+        <userTask id="node_dept_mgr" name="部门主管审批" flowable:candidateGroups="dept_mgr">
+            <extensionElements>
+                <flowable:taskListener event="complete" delegateExpression="${approvalProjectionListener}"/>
+            </extensionElements>
+        </userTask>
+
+        <sequenceFlow id="flow_dm_end" sourceRef="node_dept_mgr" targetRef="end"/>
+
+        <endEvent id="end" name="审批通过"/>
+
+    </process>
+</definitions>

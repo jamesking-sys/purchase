@@ -1,0 +1,430 @@
+/*
+ * 全局主题：把原型图（docs/prototype/index.html）的设计语言落到 React 外壳。
+ * 设计令牌 + Semi 主色对齐 + 阶段配色（A/B/D/F）+ 侧边导航 + 页面骨架（面包屑/横幅/卡片/统计/胶囊…）。
+ * 业务页（U14）可直接复用以下 .pms-* 模式类，保证与原型一致。
+ */
+
+:root {
+  /* —— 原型设计令牌 —— */
+  --pms-bg: #f7f8fa;
+  --pms-panel: #ffffff;
+  --pms-line: #e9ebf0;
+  --pms-txt: #1c1f23;
+  --pms-muted: #646a73;
+  --pms-brand: #0064fa;
+  --pms-ok: #3bb346;
+  --pms-warn: #fc8800;
+  --pms-danger: #f93920;
+  --pms-radius: 6px;
+  --pms-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+  --pms-font: "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* —— Semi 主色对齐原型 brand（#0064fa）；多数组件读取这些语义令牌 —— */
+  --semi-color-primary: #0064fa;
+  --semi-color-primary-hover: #0a59d6;
+  --semi-color-primary-active: #0048b5;
+  --semi-color-link: #0064fa;
+  --semi-color-link-hover: #0a59d6;
+  --semi-font-family: var(--pms-font);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--pms-bg);
+  color: var(--pms-txt);
+  font-family: var(--pms-font);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ===================== 外壳：侧边导航 + 主区 ===================== */
+
+.pms-shell {
+  display: flex;
+  height: 100vh;
+}
+
+.pms-nav {
+  width: 272px;
+  flex: none;
+  background: var(--pms-panel);
+  border-right: 1px solid var(--pms-line);
+  padding: 18px 12px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.pms-brand {
+  font-size: 18px;
+  margin: 6px 10px 4px;
+  font-weight: 700;
+  color: var(--pms-txt);
+}
+
+.pms-sub {
+  font-size: 13px;
+  color: var(--pms-muted);
+  margin: 0 10px 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--pms-line);
+}
+
+.pms-stage {
+  margin: 14px 0;
+}
+
+.pms-group {
+  margin: 0 6px 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  letter-spacing: .04em;
+  font-weight: 700;
+  color: var(--stage);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--stage) 13%, transparent);
+}
+
+.pms-group::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--stage);
+  flex: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--stage) 22%, transparent);
+}
+
+.pms-navbtn {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  color: var(--pms-txt);
+  padding: 10px 11px;
+  border-radius: 0 var(--pms-radius) var(--pms-radius) 0;
+  cursor: pointer;
+  font-size: 15px;
+  font-family: inherit;
+  transition: background-color .18s, border-color .18s, color .18s, box-shadow .18s;
+}
+
+.pms-stage .pms-navbtn:hover {
+  background: color-mix(in srgb, var(--stage) 10%, transparent);
+  border-left-color: var(--stage);
+}
+
+.pms-stage .pms-navbtn.active {
+  background: var(--stage);
+  color: #fff;
+  border-left-color: var(--stage);
+  font-weight: 600;
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--stage) 45%, transparent);
+}
+
+.pms-ix {
+  width: 32px;
+  color: var(--pms-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pms-navbtn.active .pms-ix {
+  color: rgba(255, 255, 255, .82);
+}
+
+.pms-nav-spacer {
+  flex: 1;
+}
+
+.pms-nav-footer {
+  margin: 12px 6px 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--pms-line);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pms-nav-user {
+  font-size: 13px;
+  color: var(--pms-muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 主区：背景随当前阶段（--active）轻微着色 */
+.pms-main {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 24px 30px 44px;
+  background: color-mix(in srgb, var(--active, var(--pms-brand)) 6%, var(--pms-bg));
+  transition: background-color .3s ease;
+}
+
+.pms-content {
+  max-width: 1180px;
+}
+
+/* ===================== 页面骨架：面包屑 + 横幅 ===================== */
+
+.pms-crumb {
+  color: var(--pms-muted);
+  font-size: 12px;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+}
+
+.pms-chip {
+  display: inline-block;
+  background: var(--stage, #888);
+  color: #fff;
+  padding: 3px 11px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 8px;
+  letter-spacing: .03em;
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--stage) 40%, transparent);
+}
+
+.pms-banner {
+  margin: 0 0 18px;
+  font-size: 21px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+  background: linear-gradient(100deg, var(--stage, var(--pms-brand)), color-mix(in srgb, var(--stage, var(--pms-brand)) 72%, #000));
+  padding: 14px 18px;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--stage, var(--pms-brand)) 32%, transparent);
+  animation: pms-rise .28s ease both;
+}
+
+@keyframes pms-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ===================== 卡片 / 统计 / 栅格 ===================== */
+
+.pms-card {
+  background: var(--pms-panel);
+  border: 1px solid var(--pms-line);
+  border-radius: var(--pms-radius);
+  padding: 16px 18px;
+  margin: 0 0 16px;
+  box-shadow: var(--pms-shadow);
+}
+
+.pms-card h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  border-left: 3px solid var(--stage, var(--pms-brand));
+  padding-left: 9px;
+  line-height: 1.25;
+}
+
+.pms-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pms-row > .pms-card {
+  flex: 1;
+  min-width: 220px;
+  margin: 0;
+}
+
+.pms-grid4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.pms-stat {
+  background: var(--pms-panel);
+  border: 1px solid var(--pms-line);
+  border-radius: var(--pms-radius);
+  padding: 14px 16px;
+  box-shadow: var(--pms-shadow);
+  border-top: 3px solid var(--stage, var(--pms-brand));
+}
+
+.pms-stat .n {
+  font-size: 24px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.pms-stat .l {
+  color: var(--pms-muted);
+  font-size: 12px;
+}
+
+/* ===================== 胶囊状态标签 ===================== */
+
+.pms-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--pms-line);
+  color: var(--pms-muted);
+}
+
+.pms-pill.p0 {
+  background: rgba(0, 100, 250, .10);
+  color: var(--pms-brand);
+  border-color: var(--pms-brand);
+}
+
+.pms-pill.ok {
+  color: var(--pms-ok);
+  border-color: var(--pms-ok);
+}
+
+.pms-pill.warn {
+  color: var(--pms-warn);
+  border-color: var(--pms-warn);
+}
+
+.pms-pill.danger {
+  color: var(--pms-danger);
+  border-color: var(--pms-danger);
+}
+
+.pms-pill.brand {
+  color: var(--pms-brand);
+  border-color: var(--pms-brand);
+}
+
+/* 横幅内的胶囊取白色描边，避免压在渐变上看不清 */
+.pms-banner .pms-pill {
+  background: rgba(255, 255, 255, .22);
+  color: #fff;
+  border-color: rgba(255, 255, 255, .5);
+}
+
+/* ===================== 表格 / 提示 / 链接 ===================== */
+
+.pms-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+
+.pms-table th,
+.pms-table td {
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--pms-line);
+  font-size: 13px;
+}
+
+.pms-table th {
+  color: var(--pms-muted);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.pms-table tr:hover td {
+  background: rgba(128, 128, 128, .06);
+}
+
+.pms-note {
+  background: rgba(252, 136, 0, .08);
+  border: 1px solid var(--pms-warn);
+  border-radius: var(--pms-radius);
+  padding: 10px 12px;
+  color: #a35a00;
+  font-size: 12px;
+  margin: 12px 0;
+}
+
+.pms-note.reserve {
+  background: rgba(100, 106, 115, .08);
+  border-color: var(--pms-muted);
+  color: var(--pms-muted);
+}
+
+.pms-note.err {
+  background: rgba(249, 57, 32, .08);
+  border-color: var(--pms-danger);
+  color: var(--pms-danger);
+}
+
+.pms-empty {
+  text-align: center;
+  color: var(--pms-muted);
+  padding: 34px 10px;
+}
+
+.pms-link {
+  color: var(--pms-brand);
+  cursor: pointer;
+  text-decoration: none;
+}
+
+/* ===================== 流转步骤条 ===================== */
+
+.pms-steps {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 4px 0 14px;
+  font-size: 12px;
+}
+
+.pms-steps .s {
+  padding: 4px 10px;
+  border: 1px solid var(--pms-line);
+  border-radius: 999px;
+  color: var(--pms-muted);
+}
+
+.pms-steps .s.cur {
+  background: var(--pms-brand);
+  color: #fff;
+  border-color: var(--pms-brand);
+}
+
+.pms-steps .s.done {
+  color: var(--pms-ok);
+  border-color: var(--pms-ok);
+}
+
+.pms-steps .arr {
+  color: var(--pms-muted);
+}

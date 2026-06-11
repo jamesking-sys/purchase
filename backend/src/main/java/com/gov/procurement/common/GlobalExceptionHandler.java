@@ -3,6 +3,8 @@ package com.gov.procurement.common;
 import cn.dev33.satoken.exception.NotLoginException;
 import cn.dev33.satoken.exception.NotPermissionException;
 import cn.dev33.satoken.exception.NotRoleException;
+import jakarta.validation.ConstraintViolationException;
+import org.flowable.common.engine.api.FlowableOptimisticLockingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DuplicateKeyException;
@@ -58,6 +60,16 @@ public class GlobalExceptionHandler {
                 .body(Result.error(ErrorCode.CODE_DUPLICATE.code(), ErrorCode.CODE_DUPLICATE.message()));
     }
 
+    /**
+     * Flowable 引擎乐观锁冲突（并发处理同一任务，落后者抛出）→ 409（40903）。
+     * 对应详设 U7 §5.4：业务侧状态前置校验先拦一道，引擎乐观锁为最终防线。
+     */
+    @ExceptionHandler(FlowableOptimisticLockingException.class)
+    public ResponseEntity<Result<Void>> handleFlowableOptimisticLock(FlowableOptimisticLockingException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(Result.error(ErrorCode.STATE_CONFLICT.code(), ErrorCode.STATE_CONFLICT.message()));
+    }
+
     /** 缺少必填请求参数 / multipart 部件 → 400（40001）。 */
     @ExceptionHandler({MissingServletRequestParameterException.class, MissingServletRequestPartException.class})
     public ResponseEntity<Result<Void>> handleMissingParam(Exception e) {
@@ -70,6 +82,17 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleValidation(MethodArgumentNotValidException e) {
         String msg = e.getBindingResult().getFieldErrors().stream()
                 .map(this::formatFieldError)
+                .collect(Collectors.joining("; "));
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(Result.error(ErrorCode.PARAM_INVALID.code(),
+                        msg.isBlank() ? ErrorCode.PARAM_INVALID.message() : msg));
+    }
+
+    /** 路径 / 请求参数级约束校验失败（{@code @Validated} + {@code @Positive} 等）→ 400（40001）。 */
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<Result<Void>> handleConstraintViolation(ConstraintViolationException e) {
+        String msg = e.getConstraintViolations().stream()
+                .map(v -> v.getPropertyPath() + ": " + v.getMessage())
                 .collect(Collectors.joining("; "));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(Result.error(ErrorCode.PARAM_INVALID.code(),

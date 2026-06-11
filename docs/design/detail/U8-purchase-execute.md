@@ -15,7 +15,7 @@
 - **业务边界**：本功能只负责「采购单 + 明细 + 到货单附件」的创建与查询；**实际入库写库存（received_qty 累加、写 `stock_item`/`stock_txn`）属于 U9**，本文不涉及。
 - **职责定位**：M4 采购与入库上下文（BC4）的写入口；只读引用 M2 的 `budget`/`budget_subject`（预算状态校验、科目关联），**不写 M2 的表**。
 - **关键约束**：
-  - 仅 `budget.status = approved` 的预算可进入采购执行（否则拒绝，错误码 40901）。
+  - 仅 `budget.status = approved` 的预算可进入采购执行（否则拒绝，错误码 40903）。
   - 供应商名称（`supplier_name`）、合同号（`contract_no`）为**可选轻量字段，不阻断**；不建独立供应商/合同模块（Non-goal）。
   - 采购明细的 `subject_id` 必须关联到已有预算科目（`budget_subject`），且应为叶子级。
   - 采购单创建后状态置 `executing`；到货单可对同一采购单上传多张。
@@ -29,7 +29,7 @@
 
 | 编号 | 规约 |
 |---|---|
-| **AC-1** | 仅当来源预算存在且 `status=approved` 时，可创建采购单；非 approved（draft/submitted/rejected）拒绝并返回 40901。 |
+| **AC-1** | 仅当来源预算存在且 `status=approved` 时，可创建采购单；非 approved（draft/submitted/rejected）拒绝并返回 40903。 |
 | **AC-2** | 来源预算 `budget_id` 不存在时，返回 40401。 |
 | **AC-3** | 创建采购单时一并写入采购明细（≥1 行）；明细含 `subject_id`（预算科目）/`material_name`/`qty`/`amount`；主单 + 明细在**单事务**内写入。 |
 | **AC-4** | 采购明细的 `subject_id` 必须命中已有 `budget_subject`（未软删）；非法科目返回 40001。 |
@@ -64,7 +64,7 @@ sequenceDiagram
         BM-->>S: budget
         S->>S: 校验 budget.status == 'approved'
         alt 非 approved
-            S-->>C: BizException(40901)
+            S-->>C: BizException(40903)
         else approved
             S->>SM: 批量校验 subjectId 存在(未软删)
             alt 存在非法科目
@@ -96,7 +96,7 @@ sequenceDiagram
     C->>S: upload(orderId, files, currentUserId)
     S->>DB: SELECT purchase_order WHERE id=orderId
     alt 采购单不存在或已作废
-        S-->>C: BizException(40401/40901)
+        S-->>C: BizException(40401/40903)
     else 存在且 executing
         loop 每个文件
             S->>FS: store(file) -> filePath
@@ -144,7 +144,7 @@ stateDiagram-v2
 ```
 budget = budgetMapper.selectById(budgetId)
 if budget == null            -> throw BizException(40401, "来源预算不存在")
-if budget.status != approved -> throw BizException(40901, "预算非已通过状态，不可执行采购")
+if budget.status != approved -> throw BizException(40903, "预算非已通过状态，不可执行采购")
 ```
 
 - `approved` 为常量（`BudgetStatus.APPROVED`），与 db §5 枚举一致。
@@ -187,7 +187,7 @@ if budget.status != approved -> throw BizException(40901, "预算非已通过状
 `ItemReq`：`subjectId`(Long,`@NotNull`)、`materialName`(String,`@NotBlank @Size(max=128)`)、`qty`(BigDecimal,`@NotNull @DecimalMin("0.001")`)、`amount`(BigDecimal,`@NotNull @DecimalMin("0.00")`)。
 
 - 响应 `Result<PurchaseOrderVO>`（含 `id`/`status`/`supplierName`/`contractNo`/`items[]`）。
-- 错误：40001（参数 / 科目非法）、40401（预算不存在）、40901（预算非 approved）、40301（无权限）、50000。
+- 错误：40001（参数 / 科目非法）、40401（预算不存在）、40903（预算非 approved）、40301（无权限）、50000。
 
 ### 6.2 查询采购明细（采购单详情）
 
@@ -206,7 +206,7 @@ if budget.status != approved -> throw BizException(40901, "预算非已通过状
 - 路径参：`id`（采购单 id）；表单：`files`（一个或多个文件，`@NotEmpty`）。
 - 后置：每文件落存储得 `file_path`，插入 `delivery_note`（`uploaded_by`=当前用户、`created_at`=now）。
 - 响应 `Result<List<DeliveryNoteVO>>`（`id`/`fileName`/`uploadedBy`/`uploadedByName`/`uploadedAt`/`downloadUrl`）。
-- 错误：40001（无文件 / 超限）、40401（采购单不存在）、40901（采购单非 executing 不可上传）、40301、50000。
+- 错误：40001（无文件 / 超限）、40401（采购单不存在）、40903（采购单非 executing 不可上传）、40301、50000。
 
 ### 6.4 下载 / 查询到货单
 
@@ -226,7 +226,7 @@ if budget.status != approved -> throw BizException(40901, "预算非已通过状
 | 编号 | 对应 AC | 测试点 | 预期 |
 |---|---|---|---|
 | **T-1** | AC-1 | 来源预算 `status=approved` 创建采购单 | 成功，`status=executing` |
-| **T-2** | AC-1 | 来源预算 `status=draft/submitted/rejected` 创建 | 拒绝，40901 |
+| **T-2** | AC-1 | 来源预算 `status=draft/submitted/rejected` 创建 | 拒绝，40903 |
 | **T-3** | AC-2 | `budgetId` 不存在 | 拒绝，40401 |
 | **T-4** | AC-3/AC-6 | 创建含 N 行明细 | 主单 + N 行明细单事务写入，`received_qty=0` |
 | **T-5** | AC-4 | 明细 `subjectId` 不存在 / 非叶子 | 拒绝，40001，事务回滚 |
@@ -235,18 +235,20 @@ if budget.status != approved -> throw BizException(40901, "预算非已通过状
 | **T-8** | AC-7/AC-9 | 上传后查询并下载到货单 | 返回上传人 + 时间；下载返回原文件流 |
 | **T-9** | AC-8 | 未登录 / 无 editor 角色调用各接口 | 401 / 40301 |
 | **T-10** | AC-3 | 明细行金额/数量非法（qty≤0、amount<0） | 40001，回滚 |
-| **T-11** | AC-7 | 向非 `executing`（如 void）采购单上传到货单 | 拒绝，40901 |
+| **T-11** | AC-7 | 向非 `executing`（如 void）采购单上传到货单 | 拒绝，40903 |
 
 ---
 
 ## 8. 异常
 
+> **编码阶段错误码归一（与 U7 一致）**：初稿用的 `40901` 与既有 `DELETE_RESTRICTED(40901)` 冲突，统一为 **40903**（`STATE_CONFLICT`）。HTTP 状态由 `GlobalExceptionHandler` 按 `code/100` 派生——故对象不存在 `40401→404`、状态冲突 `40903→409`（下表 HTTP 列已据此修正初稿的 400）。
+
 | 错误码 | HTTP | 触发 | 抛出 |
 |---|---|---|---|
-| 40001 | 400 | 参数校验失败、科目非法（不存在 / 非叶子）、金额数量非法、上传无文件 | `@Validated` → 40000 聚合 / `BizException(40001,...)` |
+| 40001 | 400 | 参数校验失败、科目非法（不存在 / 非叶子）、金额数量非法、上传无文件 | `@Validated` 聚合 / `BizException(40001,...)` |
 | 40301 | 403 | 缺 `editor` 角色 | Sa-Token `NotRoleException` → 40300（无权限场景统一 403，本功能业务语义记 40301） |
-| 40401 | 400 | 来源预算不存在 / 采购单不存在 / 到货单不存在 | `BizException(40401,...)` |
-| 40901 | 400 | 预算非 approved / 采购单非 executing 不可上传 | `BizException(40901,...)` |
+| 40401 | 404 | 来源预算不存在 / 采购单不存在 / 到货单不存在 | `BizException(40401,...)` |
+| 40903 | 409 | 预算非 approved / 采购单非 executing 不可上传 | `BizException(40903,...)` |
 | 50000 | 500 | 文件存储 IO 失败、未预期异常 | 兜底 `handleOther` → 50000 |
 
 - 事务：创建采购单（主单 + 明细）`@Transactional`，任一明细校验或写入失败整体回滚（T-5/T-10）。
@@ -256,7 +258,7 @@ if budget.status != approved -> throw BizException(40901, "预算非已通过状
 
 ## 9. 依赖与影响
 
-- **硬依赖 U7**：审批通过后 `budget.status=approved` 才可进入采购执行；U7 未完成则本功能无可用预算（40901/40401）。
+- **硬依赖 U7**：审批通过后 `budget.status=approved` 才可进入采购执行；U7 未完成则本功能无可用预算（40903/40401）。
 - **只读依赖 M2**：读 `budget`（状态校验）、`budget_subject`（科目校验），不写其表。
 - **下游 U9（多次到货验收入库）**：消费本功能产生的 `purchase_order`(executing) 与 `purchase_item`(received_qty=0)，累加 `received_qty`、写 `stock_item`/`stock_txn`，并在累计已收=采购量时把 `purchase_order.status` 推进到 `inbounded`。本功能须保证 `received_qty` 初值 0 且 `CHECK(received_qty<=qty)` 不被破坏。
 - **下游 M2 读模型（U13 预算 vs 实际）**：按 `subject_id` 聚合本功能写入的 `purchase_item.amount`，本功能保证明细科目关联正确。
@@ -268,6 +270,6 @@ if budget.status != approved -> throw BizException(40901, "预算非已通过状
 
 | 编号 | 待确认项 | 现状 / 暂定 | 拍板人 |
 |---|---|---|---|
-| **TBD-1** | 附件（到货单）存储介质 | 库内存路径；文件落本地 FS / 对象存储，经 `FileStorage` 抽象隔离（继承概要 TBD-2 / db TBD-3） | 技术 |
+| TBD-1 | 附件（到货单）存储介质 | **编码已落地抽象**：`com.gov.procurement.common.storage.FileStorage` 接口 + `LocalFileStorage`（落 `app.upload.dir`、UUID 子目录隔离、下载做目录穿越防护）；介质切换对象存储仅换实现，不动业务层。生产介质仍待技术拍板 | 技术 |
 
-> TBD 数：**1**。
+> TBD 数：**1**（存储介质待定，抽象已就位）。

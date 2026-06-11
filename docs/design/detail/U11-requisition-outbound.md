@@ -28,10 +28,10 @@ U11 实现「领用申请 → 仓管核库存审批出库（防超发）」闭�
 | # | 不变量 | 守护手段 |
 |---|---|---|
 | INV-1 | **库存不为负**：任一时刻 `stock_item.quantity >= 0` | 应用层行锁校验 + DB `CHECK(quantity>=0)` 兜底 |
-| INV-2 | **不超发**：出库数量 `qty <= 当前库存`，绝不放行超出库存的出库 | `FOR UPDATE` 锁内重新读取并比对，不足即拒绝（40903） |
+| INV-2 | **不超发**：出库数量 `qty <= 当前库存`，绝不放行超出库存的出库 | `FOR UPDATE` 锁内重新读取并比对，不足即拒绝（40904） |
 | INV-3 | **账实一致**：库存量变动必经 `stock_txn`，`quantity` 增减 = 流水累计 | 扣减与插流水在同一事务，`type=outbound`、`qty_change=-qty`、`ref_type=outbound_order` |
 | INV-4 | **一领用单一出库单**：`outbound_order.requisition_id` 唯一 | DB `uk_ob_req(requisition_id)` + 状态机只允许 `pending_warehouse` 出库一次 |
-| INV-5 | **状态单调**：`requisition.status` 仅 `pending_warehouse → outbound|rejected`，终态不可逆 | 处理前校验当前态，非待审即拒绝（40901） |
+| INV-5 | **状态单调**：`requisition.status` 仅 `pending_warehouse → outbound|rejected`，终态不可逆 | 处理前校验当前态，非待审即拒绝（40903） |
 
 ### 2.2 验收准则（Acceptance Criteria）
 
@@ -40,10 +40,10 @@ U11 实现「领用申请 → 仓管核库存审批出库（防超发）」闭�
 | AC-1 | 领用人发起领用：填物料(库存项)+数量(>0)+用途，生成 `requisition` + `requisition_item`，状态 `pending_warehouse`。 |
 | AC-2 | 仓管查待办：返回所有 `status=pending_warehouse` 的领用单（含申请人、项目组、明细、当前库存）。 |
 | AC-3 | 审批出库（库存充足）：单事务内行锁→校验→扣减→记流水→生成出库单/明细→`status=outbound`，全部成功提交。 |
-| AC-4 | 审批出库（库存不足）：任一明细 `qty>当前库存`，整单拒绝（40903 防超发），不扣减、不改状态、事务回滚。 |
+| AC-4 | 审批出库（库存不足）：任一明细 `qty>当前库存`，整单拒绝（40904 防超发），不扣减、不改状态、事务回滚。 |
 | AC-5 | 并发两笔出库竞争同一库存项：行锁串行化，仅库存足够的一笔成功，另一笔在锁释放后看到新值，不足则拒绝——合计不超发。 |
-| AC-6 | 驳回：仓管对 `pending_warehouse` 单填写意见驳回，`status=rejected`；未填意见拒绝（42202）。 |
-| AC-7 | 重复处理：对已 `outbound`/`rejected` 的单再次审批/驳回，拒绝（40901）。 |
+| AC-6 | 驳回：仓管对 `pending_warehouse` 单填写意见驳回，`status=rejected`；未填意见拒绝（42203）。 |
+| AC-7 | 重复处理：对已 `outbound`/`rejected` 的单再次审批/驳回，拒绝（40903）。 |
 | AC-8 | 鉴权：发起领用限 `requester`，审批出库/驳回限 `warehouse`，角色不符拒绝（40301）。 |
 
 ---
@@ -68,7 +68,7 @@ sequenceDiagram
     alt 单不存在
         S-->>C: BizException(40401)
     else 状态非 pending_warehouse
-        S-->>C: BizException(40901 已处理)
+        S-->>C: BizException(40903 已处理)
     else 可处理
         loop 每条领用明细
             S->>K: lockAndCheck(stockItemId, qty)
@@ -76,7 +76,7 @@ sequenceDiagram
             alt 库存项不存在
                 K-->>S: BizException(40401)
             else 库存不足 quantity < qty
-                K-->>S: BizException(40903 防超发)
+                K-->>S: BizException(40904 防超发)
             else 库存充足
                 K->>DB: UPDATE stock_item SET quantity = quantity - qty (CHECK>=0 兜底)
                 K->>DB: INSERT stock_txn(outbound, -qty, ref_type=outbound_order, ref_id=待回填)
@@ -126,7 +126,7 @@ stateDiagram-v2
     rejected --> [*]
     note right of pending_warehouse
       仅此态可被审批/驳回；
-      重复处理 -> 40901
+      重复处理 -> 40903
     end note
     note right of outbound
       终态不可逆；
@@ -155,9 +155,9 @@ stateDiagram-v2
 
 - 审批出库进入 `@Transactional(rollbackFor = Exception.class)`，事务隔离用 PostgreSQL 默认 `READ COMMITTED` 即可——`FOR UPDATE` 提供行级互斥，锁持有期间其他事务对同一行的 `FOR UPDATE`/`UPDATE` 阻塞至本事务提交/回滚。
 - 对领用单每条明细的 `stock_item`，先 `SELECT ... FOR UPDATE` 重新取**锁内最新** `quantity`，再比对申请量：
-  - `quantity < qty` → 抛 `BizException(40903, "库存不足，不可超发")`，事务回滚。
+  - `quantity < qty` → 抛 `BizException(40904, "库存不足，不可超发")`，事务回滚。
   - `quantity >= qty` → `UPDATE stock_item SET quantity = quantity - #{qty} WHERE id = #{id}`。
-- DB `CHECK(quantity>=0)` 为兜底护栏：即便应用层逻辑被绕过，负库存的 UPDATE 也被数据库拒绝（触发约束异常 → 50000 或在编码层映射为 40903）。
+- DB `CHECK(quantity>=0)` 为兜底护栏：即便应用层逻辑被绕过，负库存的 UPDATE 也被数据库拒绝（触发约束异常 → 50000 或在编码层映射为 40904）。
 
 > Mapper 示例（编码阶段实现）：`SELECT id, quantity FROM stock_item WHERE id = #{id} AND is_deleted = 0 FOR UPDATE`。逐项加锁；建议按 `stock_item_id` 升序加锁以避免多明细交叉造成的死锁。
 
@@ -208,17 +208,17 @@ stateDiagram-v2
 - **请求体**：无（或空对象）；审批人取登录态 `operatorId`。
 - **处理**：§3.1 单事务（行锁→校验→扣减→流水→出库单→状态）。
 - **响应**：`Result<{ requisitionId, outboundOrderId, status }>`，`status='outbound'`。
-- **错误**：40301 非 warehouse；40401 领用单/库存项不存在；40901 状态不符（已处理）；40903 库存不足（防超发）；50000 系统。
+- **错误**：40301 非 warehouse；40401 领用单/库存项不存在；40903 状态不符（已处理）；40904 库存不足（防超发）；50000 系统。
 
 ### 6.4 驳回 · `POST /api/requisitions/{id}/reject`
 
 - **鉴权**：`@SaCheckRole("warehouse")`
 - **路径参数**：`id` 领用单 id。
 - **请求体**：`{ "opinion": "库存紧张，暂缓" }`，`opinion` 必填非空白。
-- **校验**：`opinion` 为空 → 42202（驳回未填意见）。
+- **校验**：`opinion` 为空 → 42203（驳回未填意见）。
 - **处理**：校验状态=pending_warehouse → `status='rejected'`，记录驳回意见。
 - **响应**：`Result<{ requisitionId, status }>`，`status='rejected'`。
-- **错误**：40301 非 warehouse；40401 不存在；40901 状态不符（已处理）；42202 未填意见；50000 系统。
+- **错误**：40301 非 warehouse；40401 不存在；40903 状态不符（已处理）；42203 未填意见；50000 系统。
 
 ### 6.5 查询 · `GET /api/requisitions` / `GET /api/requisitions/{id}`
 
@@ -241,13 +241,13 @@ stateDiagram-v2
 | T-2 | AC-1 | 发起领用 qty<=0 或 items 为空 | 40001 参数非法，不落库 |
 | T-3 | AC-2 | warehouse 查待办 | 仅返回 `pending_warehouse` 单，含明细与当前库存、enough 标记 |
 | T-4 | AC-3 | 正常出库扣减：库存 40、申请 3 | `quantity` 40→37，插 1 条 `stock_txn(outbound,-3)`，生成出库单/明细，`status=outbound`，单事务提交 |
-| T-5 | AC-4 | 库存不足拒绝：库存 2、申请 3 | 40903 防超发，`quantity` 不变、无流水、无出库单、`status` 仍 pending（事务回滚） |
-| T-6 | AC-5 | 并发出库防超发：库存 2，两请求各申请 2 | 一笔成功(quantity→0)、另一笔 40903；合计扣减不超 2，无负库存 |
+| T-5 | AC-4 | 库存不足拒绝：库存 2、申请 3 | 40904 防超发，`quantity` 不变、无流水、无出库单、`status` 仍 pending（事务回滚） |
+| T-6 | AC-5 | 并发出库防超发：库存 2，两请求各申请 2 | 一笔成功(quantity→0)、另一笔 40904；合计扣减不超 2，无负库存 |
 | T-7 | AC-5/INV-1 | CHECK 兜底：构造直减至负 | DB `CHECK(quantity>=0)` 拒绝，事务回滚 |
 | T-8 | AC-6 | 驳回填意见 | `status=rejected`，意见落库 |
-| T-9 | AC-6 | 驳回未填意见 | 42202，状态不变 |
-| T-10 | AC-7 | 重复处理：对已 outbound/rejected 单再审批或驳回 | 40901 状态不符，无副作用 |
-| T-11 | AC-7/INV-4 | 同一领用单二次出库 | 40901（状态已变）/ `uk_ob_req` 兜底唯一，不生成第二张出库单 |
+| T-9 | AC-6 | 驳回未填意见 | 42203，状态不变 |
+| T-10 | AC-7 | 重复处理：对已 outbound/rejected 单再审批或驳回 | 40903 状态不符，无副作用 |
+| T-11 | AC-7/INV-4 | 同一领用单二次出库 | 40903（状态已变）/ `uk_ob_req` 兜底唯一，不生成第二张出库单 |
 | T-12 | AC-8 | 角色越权：非 requester 发起 / 非 warehouse 审批 | 40301 角色不符 |
 | T-13 | AC-3 | 库存项不存在（明细引用已删/错误 id） | 40401 不存在，事务回滚 |
 
@@ -257,14 +257,16 @@ stateDiagram-v2
 
 ## 8. 异常处理
 
+> **编码阶段错误码归一（与 U7/U8/U9 一致）**：初稿的 `40901`(状态不符)、`40903`(库存不足)、`42202`(驳回未填意见) 与既有码冲突，统一为——状态不符 **40903**（`STATE_CONFLICT`）、库存不足 **40904**（`INSUFFICIENT_STOCK`，新增）、驳回意见必填 **42203**（复用 U7 `REJECT_OPINION_REQUIRED`）。HTTP 由 `GlobalExceptionHandler` 按 `code/100` 派生（下表 HTTP 列据此修正初稿的 400）。CHECK(quantity>=0) 兜底仅理论触发（FOR UPDATE 下应用层校验权威），若触发归 50000。
+
 | 场景 | 错误码 | HTTP | 事务 | 说明 |
 |---|---|---|---|---|
 | 入参非法（qty<=0、items 空、必填缺失） | 40001 | 400 | 不开启/无副作用 | `@Validated` → `MethodArgumentNotValidException` → 统一处理 |
 | 角色不符 / 无权限 | 40301 | 403 | — | Sa-Token `NotRoleException` 或显式 `BizException(40301)` |
-| 领用单 / 库存项不存在 | 40401 | 400 | 回滚 | 查无记录抛 `BizException(40401)` |
-| 状态不符（已处理） | 40901 | 400 | 回滚 | 非 `pending_warehouse` 拒绝重复处理 |
-| 库存不足（防超发） | 40903 | 400 | **回滚** | 锁内校验不足；CHECK 兜底异常亦映射至此语义 |
-| 驳回未填意见 | 42202 | 400 | 回滚 | `opinion` 空白校验 |
+| 领用单 / 库存项不存在 | 40401 | 404 | 回滚 | 查无记录抛 `BizException(40401)` |
+| 状态不符（已处理） | 40903 | 409 | 回滚 | 非 `pending_warehouse` 拒绝重复处理（领用单行锁 FOR UPDATE 串行化） |
+| 库存不足（防超发） | 40904 | 409 | **回滚** | 库存项 FOR UPDATE 锁内校验不足即拒绝 |
+| 驳回未填意见 | 42203 | 422 | 回滚 | `opinion` 空白校验 |
 | 系统异常 | 50000 | 500 | 回滚 | 兜底，不泄露堆栈 |
 
 - 审批出库 Service 标注 `@Transactional(rollbackFor = Exception.class)`，任一 `BizException` 或 DB 约束异常触发**整单回滚**：库存量、流水、出库单/明细、状态全部不落库，`FOR UPDATE` 行锁随事务结束释放，不留悬挂锁。
